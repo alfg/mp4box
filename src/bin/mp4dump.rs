@@ -404,6 +404,7 @@ struct JsonBox {
     version: Option<u8>,
     flags: Option<u32>,
     kind: String,
+    full_name: String,
     decoded: Option<String>,
     children: Option<Vec<JsonBox>>,
 }
@@ -420,6 +421,9 @@ fn build_json_for_box(
             .map(|b| format!("{:02x}", b))
             .collect::<String>()
     });
+
+    let kb = mp4box::known_boxes::KnownBox::from(hdr.typ);
+    let full_name = kb.full_name().to_string();
 
     let (version, flags, kind_str, children) = match &b.kind {
         NodeKind::FullBox { version, flags, .. } => (
@@ -453,6 +457,7 @@ fn build_json_for_box(
         version,
         flags,
         kind: kind_str,
+        full_name,
         decoded,
         children,
     }
