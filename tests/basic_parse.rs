@@ -1,4 +1,4 @@
-use mp4box::boxes::{FourCC};
+use mp4box::boxes::FourCC;
 use mp4box::parser::{parse_children, read_box_header};
 use std::io::{Cursor, Seek, SeekFrom};
 
