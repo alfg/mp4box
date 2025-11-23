@@ -19,7 +19,7 @@ fn main() -> anyhow::Result<()> {
                 b.typ == "trak"
                     && b.children
                         .as_ref()
-                        .map_or(false, |c| c.iter().any(|cb| cb.typ == "mdia"))
+                        .is_some_and(|c| c.iter().any(|cb| cb.typ == "mdia"))
             })
         })
     });
