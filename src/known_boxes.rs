@@ -331,6 +331,7 @@ impl KnownBox {
                 | KnownBox::Stsh
                 | KnownBox::Padb
                 | KnownBox::Stdp
+                | KnownBox::Stsd
                 | KnownBox::Sdtp
                 | KnownBox::Sgpd
                 | KnownBox::Sbgp

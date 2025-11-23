@@ -19,7 +19,7 @@ struct TrackInfo {
     index: usize,
 
     #[serde(skip_serializing_if = "Option::is_none")]
-    track_type: Option<String>,      // e.g. "video", "audio", "other"
+    track_type: Option<String>,      // "video" / "audio" / "other"
 
     #[serde(skip_serializing_if = "Option::is_none")]
     codec: Option<String>,           // e.g. "avc1", "hvc1", "mp4a"
@@ -160,7 +160,21 @@ fn parse_trak(trak: &JsonBox, index: usize, info: &mut MediaInfo) {
         language: None,
     };
 
-    // mdia -> mdhd + hdlr
+    // tkhd at the trak level: possible width/height
+    if let Some(tkhd) = find_child(trak, "tkhd") {
+        if let Some(decoded) = &tkhd.decoded {
+            // For “normal” tkhd decoders you’ll get something like:
+            // "track_id=1 duration=... width=1920 height=1080"
+            if let Some(w) = parse_u32_field(decoded, "width=") {
+                ti.width = Some(w);
+            }
+            if let Some(h) = parse_u32_field(decoded, "height=") {
+                ti.height = Some(h);
+            }
+        }
+    }
+
+    // mdia -> mdhd + hdlr + minf
     let mdia = match find_child(trak, "mdia") {
         Some(m) => m,
         None => {
@@ -187,12 +201,10 @@ fn parse_trak(trak: &JsonBox, index: usize, info: &mut MediaInfo) {
         }
     }
 
-    // hdlr: we may eventually parse handler type ("vide"/"soun") from decoded string
+    // hdlr: determine track type (video/audio/other)
     if let Some(hdlr) = find_child(mdia, "hdlr") {
         if let Some(decoded) = &hdlr.decoded {
-            // Current decoder prints something like:
-            // "handler= name=\"...\"" — if you later include the handler type,
-            // e.g. "handler=vide name=...", this will start working better.
+            // Ideally your hdlr decoder now prints "handler=vide name=..."
             if let Some(handler) = parse_string_field(decoded, "handler=") {
                 let tt = match handler.as_str() {
                     "vide" => "video",
@@ -204,16 +216,32 @@ fn parse_trak(trak: &JsonBox, index: usize, info: &mut MediaInfo) {
         }
     }
 
-    // minf -> stbl -> stsd -> first sample entry => codec 4CC
+    // minf -> stbl -> stsd: codec + width/height from decoded text
     if let Some(minf) = find_child(mdia, "minf") {
         if let Some(stbl) = find_child(minf, "stbl") {
             if let Some(stsd) = find_child(stbl, "stsd") {
-                if let Some(children) = &stsd.children {
-                    if let Some(sample_entry) = children.first() {
-                        // e.g. "avc1", "hvc1", "mp4a", "hev1"
-                        ti.codec = Some(sample_entry.typ.clone());
-                        // In future, when you decode sample entries, you can
-                        // also fill ti.width / ti.height from the decoder here.
+                if let Some(decoded) = &stsd.decoded {
+                    // codec
+                    if let Some(c) = parse_string_field(decoded, "codec=") {
+                        ti.codec = Some(c.clone());
+
+                        // If no type from hdlr, infer from codec
+                        if ti.track_type.is_none() {
+                            let tt = match c.as_str() {
+                                "avc1" | "hvc1" | "hev1" | "vp09" | "av01" => "video",
+                                "mp4a" | "ac-3" | "ec-3" | "Opus" => "audio",
+                                _ => "other",
+                            };
+                            ti.track_type = Some(tt.to_string());
+                        }
+                    }
+
+                    // width / height (for video)
+                    if let Some(w) = parse_u32_field(decoded, "width=") {
+                        ti.width = Some(w);
+                    }
+                    if let Some(h) = parse_u32_field(decoded, "height=") {
+                        ti.height = Some(h);
                     }
                 }
             }
@@ -222,6 +250,7 @@ fn parse_trak(trak: &JsonBox, index: usize, info: &mut MediaInfo) {
 
     info.tracks.push(ti);
 }
+
 
 fn find_child<'a>(parent: &'a JsonBox, typ: &str) -> Option<&'a JsonBox> {
     parent
@@ -297,18 +326,12 @@ fn print_human(info: &MediaInfo) {
         println!("Minor version: {}", minor);
     }
     if !info.compatible_brands.is_empty() {
-        println!(
-            "Compatible brands: {}",
-            info.compatible_brands.join(", ")
-        );
+        println!("Compatible brands: {}", info.compatible_brands.join(", "));
     }
 
     if let (Some(ts), Some(dur)) = (info.movie_timescale, info.movie_duration_ticks) {
         let sec = dur as f64 / ts as f64;
-        println!(
-            "Movie duration: {} ticks @ {} -> {:.3} s",
-            dur, ts, sec
-        );
+        println!("Movie duration: {} ticks @ {} -> {:.3} s", dur, ts, sec);
     }
 
     if info.tracks.is_empty() {
