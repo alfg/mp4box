@@ -68,6 +68,12 @@ impl Registry {
     }
 }
 
+impl Default for Registry {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 // ---------- Helpers ----------
 
 fn read_all(r: &mut dyn Read) -> anyhow::Result<Vec<u8>> {

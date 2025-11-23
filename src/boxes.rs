@@ -1,17 +1,10 @@
 use std::fmt;
+use std::str::FromStr;
 
 #[derive(Copy, Clone, Eq, PartialEq, Hash)]
 pub struct FourCC(pub [u8; 4]);
 
 impl FourCC {
-    pub fn from_str(s: &str) -> Option<Self> {
-        let b = s.as_bytes();
-        if b.len() == 4 {
-            Some(FourCC([b[0], b[1], b[2], b[3]]))
-        } else {
-            None
-        }
-    }
     pub fn as_str_lossy(&self) -> String {
         self.0
             .iter()
@@ -33,6 +26,25 @@ impl fmt::Debug for FourCC {
 impl fmt::Display for FourCC {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.as_str_lossy())
+    }
+}
+
+impl From<[u8; 4]> for FourCC {
+    fn from(b: [u8; 4]) -> Self {
+        FourCC(b)
+    }
+}
+
+impl FromStr for FourCC {
+    type Err = ();
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let b = s.as_bytes();
+        if b.len() == 4 {
+            Ok(FourCC([b[0], b[1], b[2], b[3]]))
+        } else {
+            Err(())
+        }
     }
 }
 

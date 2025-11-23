@@ -258,11 +258,7 @@ pub fn hex_range<P: AsRef<Path>>(path: P, offset: u64, max_len: u64) -> anyhow::
     let file_len = f.metadata()?.len();
 
     // How many bytes are actually available from this offset to EOF.
-    let available = if offset >= file_len {
-        0
-    } else {
-        file_len - offset
-    };
+    let available = file_len.saturating_sub(offset);
 
     // Don't read past EOF or more than the caller requested.
     let to_read = min(available, max_len);

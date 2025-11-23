@@ -8,8 +8,7 @@ use mp4box::{
     BoxHeader,
 };
 use serde::Serialize;
-use serde_json;
-use std::fs::File;
+use std::{fs::File, str::FromStr};
 use std::io::{Read, Seek, SeekFrom};
 
 #[derive(Parser, Debug)]
@@ -175,7 +174,7 @@ fn print_box(
                 hdr.size,
                 display_type(hdr)
             );
-            if depth + 1 <= max_depth {
+            if depth < max_depth {
                 for c in children {
                     print_box(f, c, depth + 1, max_depth, decode, reg)?;
                 }
@@ -278,8 +277,8 @@ fn dump_raw(f: &mut File, boxes: &[BoxRef], sel: &str, limit: usize) -> anyhow::
     Ok(())
 }
 
-fn select_boxes<'a>(
-    list: &'a [BoxRef],
+fn select_boxes(
+    list: &[BoxRef],
     sel: &str,
     out: &mut Vec<(u64, u64, mp4box::boxes::BoxHeader)>,
 ) {
