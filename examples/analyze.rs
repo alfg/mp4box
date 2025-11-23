@@ -15,7 +15,12 @@ fn main() -> anyhow::Result<()> {
     // Example: print types of all top-level boxes
     let media_info = boxes.iter().find(|b| b.typ == "moov").and_then(|moov_box| {
         moov_box.children.as_ref().and_then(|children| {
-            children.iter().find(|b| b.typ == "trak" && b.children.as_ref().map_or(false, |c| c.iter().any(|cb| cb.typ == "mdia")))
+            children.iter().find(|b| {
+                b.typ == "trak"
+                    && b.children
+                        .as_ref()
+                        .map_or(false, |c| c.iter().any(|cb| cb.typ == "mdia"))
+            })
         })
     });
     if let Some(trak_box) = media_info {

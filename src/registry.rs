@@ -389,7 +389,9 @@ impl BoxDecoder for StsdDecoder {
 
         let mut codec_bytes = [0u8; 4];
         r.read_exact(&mut codec_bytes)?;
-        let codec = std::str::from_utf8(&codec_bytes).unwrap_or("????").to_string();
+        let codec = std::str::from_utf8(&codec_bytes)
+            .unwrap_or("????")
+            .to_string();
 
         // Now we’re at SampleEntry fields.
         // For visual sample entries (avc1/hvc1/etc.), layout is:

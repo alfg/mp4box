@@ -34,6 +34,6 @@ pub mod util;
 pub mod json_api;
 
 pub use boxes::{BoxHeader, BoxKey, BoxRef, FourCC, NodeKind};
-pub use json_api::{analyze_file, hex_range, HexDump, JsonBox};
+pub use json_api::{HexDump, JsonBox, analyze_file, hex_range};
 pub use parser::{parse_children, read_box_header};
 pub use registry::{BoxValue, Registry};

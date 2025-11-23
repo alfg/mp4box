@@ -1,7 +1,7 @@
 use crate::{
     boxes::{BoxRef, NodeKind},
     parser::read_box_header,
-    registry::{default_registry, BoxValue, Registry},
+    registry::{BoxValue, Registry, default_registry},
     util::{hex_dump, read_slice},
 };
 use byteorder::ReadBytesExt;

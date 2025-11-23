@@ -1,5 +1,5 @@
 use clap::Parser;
-use mp4box::{analyze_file, JsonBox};
+use mp4box::{JsonBox, analyze_file};
 use serde::Serialize;
 use std::path::PathBuf;
 
@@ -19,10 +19,10 @@ struct TrackInfo {
     index: usize,
 
     #[serde(skip_serializing_if = "Option::is_none")]
-    track_type: Option<String>,      // "video" / "audio" / "other"
+    track_type: Option<String>, // "video" / "audio" / "other"
 
     #[serde(skip_serializing_if = "Option::is_none")]
-    codec: Option<String>,           // e.g. "avc1", "hvc1", "mp4a"
+    codec: Option<String>, // e.g. "avc1", "hvc1", "mp4a"
 
     #[serde(skip_serializing_if = "Option::is_none")]
     width: Option<u32>,
@@ -42,7 +42,6 @@ struct TrackInfo {
     #[serde(skip_serializing_if = "Option::is_none")]
     language: Option<String>,
 }
-
 
 #[derive(Debug, Serialize)]
 struct MediaInfo {
@@ -126,17 +125,17 @@ fn parse_moov(b: &JsonBox, info: &mut MediaInfo) {
     };
 
     // mvhd for overall movie duration
-    if let Some(mvhd) = children.iter().find(|c| c.typ == "mvhd") {
-        if let Some(decoded) = &mvhd.decoded {
-            // Example: "timescale=600000 duration=65536"
-            if let Some(ts) = parse_u32_field(decoded, "timescale=") {
-                info.movie_timescale = Some(ts);
-            }
-            if let Some(dur) = parse_u64_field(decoded, "duration=") {
-                info.movie_duration_ticks = Some(dur);
-                if let Some(ts) = info.movie_timescale {
-                    info.movie_duration_seconds = Some(dur as f64 / ts as f64);
-                }
+    if let Some(mvhd) = children.iter().find(|c| c.typ == "mvhd")
+        && let Some(decoded) = &mvhd.decoded
+    {
+        // Example: "timescale=600000 duration=65536"
+        if let Some(ts) = parse_u32_field(decoded, "timescale=") {
+            info.movie_timescale = Some(ts);
+        }
+        if let Some(dur) = parse_u64_field(decoded, "duration=") {
+            info.movie_duration_ticks = Some(dur);
+            if let Some(ts) = info.movie_timescale {
+                info.movie_duration_seconds = Some(dur as f64 / ts as f64);
             }
         }
     }
@@ -161,16 +160,16 @@ fn parse_trak(trak: &JsonBox, index: usize, info: &mut MediaInfo) {
     };
 
     // tkhd at the trak level: possible width/height
-    if let Some(tkhd) = find_child(trak, "tkhd") {
-        if let Some(decoded) = &tkhd.decoded {
-            // For “normal” tkhd decoders you’ll get something like:
-            // "track_id=1 duration=... width=1920 height=1080"
-            if let Some(w) = parse_u32_field(decoded, "width=") {
-                ti.width = Some(w);
-            }
-            if let Some(h) = parse_u32_field(decoded, "height=") {
-                ti.height = Some(h);
-            }
+    if let Some(tkhd) = find_child(trak, "tkhd")
+        && let Some(decoded) = &tkhd.decoded
+    {
+        // For “normal” tkhd decoders you’ll get something like:
+        // "track_id=1 duration=... width=1920 height=1080"
+        if let Some(w) = parse_u32_field(decoded, "width=") {
+            ti.width = Some(w);
+        }
+        if let Some(h) = parse_u32_field(decoded, "height=") {
+            ti.height = Some(h);
         }
     }
 
@@ -184,73 +183,70 @@ fn parse_trak(trak: &JsonBox, index: usize, info: &mut MediaInfo) {
     };
 
     // mdhd: timescale / duration / language
-    if let Some(mdhd) = find_child(mdia, "mdhd") {
-        if let Some(decoded) = &mdhd.decoded {
-            if let Some(ts) = parse_u32_field(decoded, "timescale=") {
-                ti.timescale = Some(ts);
+    if let Some(mdhd) = find_child(mdia, "mdhd")
+        && let Some(decoded) = &mdhd.decoded
+    {
+        if let Some(ts) = parse_u32_field(decoded, "timescale=") {
+            ti.timescale = Some(ts);
+        }
+        if let Some(dur) = parse_u64_field(decoded, "duration=") {
+            ti.duration_ticks = Some(dur);
+            if let Some(ts) = ti.timescale {
+                ti.duration_seconds = Some(dur as f64 / ts as f64);
             }
-            if let Some(dur) = parse_u64_field(decoded, "duration=") {
-                ti.duration_ticks = Some(dur);
-                if let Some(ts) = ti.timescale {
-                    ti.duration_seconds = Some(dur as f64 / ts as f64);
-                }
-            }
-            if let Some(lang) = parse_string_field(decoded, "language=") {
-                ti.language = Some(lang);
-            }
+        }
+        if let Some(lang) = parse_string_field(decoded, "language=") {
+            ti.language = Some(lang);
         }
     }
 
     // hdlr: determine track type (video/audio/other)
-    if let Some(hdlr) = find_child(mdia, "hdlr") {
-        if let Some(decoded) = &hdlr.decoded {
-            // Ideally your hdlr decoder now prints "handler=vide name=..."
-            if let Some(handler) = parse_string_field(decoded, "handler=") {
-                let tt = match handler.as_str() {
-                    "vide" => "video",
-                    "soun" => "audio",
+    if let Some(hdlr) = find_child(mdia, "hdlr")
+        && let Some(decoded) = &hdlr.decoded
+    {
+        // Ideally your hdlr decoder now prints "handler=vide name=..."
+        if let Some(handler) = parse_string_field(decoded, "handler=") {
+            let tt = match handler.as_str() {
+                "vide" => "video",
+                "soun" => "audio",
+                _ => "other",
+            };
+            ti.track_type = Some(tt.to_string());
+        }
+    }
+
+    // minf -> stbl -> stsd: codec + width/height from decoded text
+    if let Some(minf) = find_child(mdia, "minf")
+        && let Some(stbl) = find_child(minf, "stbl")
+        && let Some(stsd) = find_child(stbl, "stsd")
+        && let Some(decoded) = &stsd.decoded
+    {
+        // codec
+        if let Some(c) = parse_string_field(decoded, "codec=") {
+            ti.codec = Some(c.clone());
+
+            // If no type from hdlr, infer from codec
+            if ti.track_type.is_none() {
+                let tt = match c.as_str() {
+                    "avc1" | "hvc1" | "hev1" | "vp09" | "av01" => "video",
+                    "mp4a" | "ac-3" | "ec-3" | "Opus" => "audio",
                     _ => "other",
                 };
                 ti.track_type = Some(tt.to_string());
             }
         }
-    }
 
-    // minf -> stbl -> stsd: codec + width/height from decoded text
-    if let Some(minf) = find_child(mdia, "minf") {
-        if let Some(stbl) = find_child(minf, "stbl") {
-            if let Some(stsd) = find_child(stbl, "stsd") {
-                if let Some(decoded) = &stsd.decoded {
-                    // codec
-                    if let Some(c) = parse_string_field(decoded, "codec=") {
-                        ti.codec = Some(c.clone());
-
-                        // If no type from hdlr, infer from codec
-                        if ti.track_type.is_none() {
-                            let tt = match c.as_str() {
-                                "avc1" | "hvc1" | "hev1" | "vp09" | "av01" => "video",
-                                "mp4a" | "ac-3" | "ec-3" | "Opus" => "audio",
-                                _ => "other",
-                            };
-                            ti.track_type = Some(tt.to_string());
-                        }
-                    }
-
-                    // width / height (for video)
-                    if let Some(w) = parse_u32_field(decoded, "width=") {
-                        ti.width = Some(w);
-                    }
-                    if let Some(h) = parse_u32_field(decoded, "height=") {
-                        ti.height = Some(h);
-                    }
-                }
-            }
+        // width / height (for video)
+        if let Some(w) = parse_u32_field(decoded, "width=") {
+            ti.width = Some(w);
+        }
+        if let Some(h) = parse_u32_field(decoded, "height=") {
+            ti.height = Some(h);
         }
     }
 
     info.tracks.push(ti);
 }
-
 
 fn find_child<'a>(parent: &'a JsonBox, typ: &str) -> Option<&'a JsonBox> {
     parent
@@ -284,10 +280,7 @@ fn parse_string_field(s: &str, key: &str) -> Option<String> {
     rest = rest.trim_start();
 
     // Take until next space or end
-    let token: String = rest
-        .chars()
-        .take_while(|c| !c.is_whitespace())
-        .collect();
+    let token: String = rest.chars().take_while(|c| !c.is_whitespace()).collect();
 
     if token.is_empty() {
         None

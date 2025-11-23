@@ -1,11 +1,11 @@
 use clap::{ArgAction, Parser};
 use mp4box::{
+    BoxHeader,
     boxes::{BoxKey, BoxRef, FourCC, NodeKind},
     known_boxes::KnownBox,
     parser::{parse_children, read_box_header},
-    registry::{default_registry, BoxValue, Registry},
+    registry::{BoxValue, Registry, default_registry},
     util::{hex_dump, read_slice},
-    BoxHeader,
 };
 use serde::Serialize;
 use std::io::{Read, Seek, SeekFrom};
