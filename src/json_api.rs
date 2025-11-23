@@ -264,15 +264,31 @@ pub fn hex_range<P: AsRef<Path>>(
     let mut f = File::open(&path)?;
     let file_len = f.metadata()?.len();
 
-    let available = if offset >= file_len { 0 } else { file_len - offset };
+    // How many bytes are actually available from this offset to EOF.
+    let available = if offset >= file_len {
+        0
+    } else {
+        file_len - offset
+    };
+
+    // Don't read past EOF or more than the caller requested.
     let to_read = min(available, max_len);
+
+    // If nothing is available, just return an empty dump.
+    if to_read == 0 {
+        return Ok(HexDump {
+            offset,
+            length: 0,
+            hex: String::new(),
+        });
+    }
 
     let data = read_slice(&mut f, offset, to_read)?;
     let hex_str = hex_dump(&data, offset);
 
     Ok(HexDump {
         offset,
-        length: to_read,
+        length: to_read, // <-- IMPORTANT: actual bytes read, not max_len
         hex: hex_str,
     })
 }
