@@ -12,6 +12,47 @@ Suitable for CLIs, Tauri backends, media inspectors, and developer tooling.
 
 ---
 
+## Installation
+
+Add this to your `Cargo.toml`:
+
+```toml
+[dependencies]
+mp4box = "0.4"
+anyhow = "1.0"  # For error handling in examples
+```
+
+---
+
+## Quick Start
+
+```rust
+use mp4box::get_boxes;
+use std::fs::File;
+
+fn main() -> anyhow::Result<()> {
+    let mut file = File::open("video.mp4")?;
+    let size = file.metadata()?.len();
+    
+    // Parse all boxes without decoding
+    let boxes = get_boxes(&mut file, size, false)?;
+    println!("Found {} top-level boxes", boxes.len());
+    
+    // Parse with decoding for known box types
+    let mut file = File::open("video.mp4")?;
+    let decoded_boxes = get_boxes(&mut file, size, true)?;
+    
+    // Print decoded info for ftyp box
+    if let Some(ftyp) = decoded_boxes.iter().find(|b| b.typ == "ftyp") {
+        println!("File type: {}", ftyp.decoded.as_ref().unwrap_or(&"unknown".to_string()));
+    }
+    
+    Ok(())
+}
+```
+
+---
+
 ## Features
 
 - **Zero-dependency parser** (`Read + Seek`)
@@ -59,7 +100,12 @@ fn main() -> anyhow::Result<()> {
 ## Example: Build a JSON tree (for GUIs / Tauri)
 
 ```rust
-let boxes = mp4box::analyze_file("video.mp4", /*decode=*/ false)?;
+use mp4box::get_boxes;
+use std::fs::File;
+
+let mut file = File::open("video.mp4")?;
+let size = file.metadata()?.len();
+let boxes = get_boxes(&mut file, size, /*decode=*/ false)?;
 println!("{} top-level boxes", boxes.len());
 ```
 

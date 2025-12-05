@@ -1,5 +1,5 @@
 use clap::Parser;
-use mp4box::{JsonBox, analyze_file};
+use mp4box::{Box, get_boxes};
 use serde::Serialize;
 use std::path::PathBuf;
 
@@ -69,7 +69,10 @@ fn main() -> anyhow::Result<()> {
     let args = Args::parse();
     let path = PathBuf::from(&args.path);
 
-    let boxes = analyze_file(&path, /*decode=*/ true)?;
+    let mut file = std::fs::File::open(&path)?;
+    let size = file.metadata()?.len();
+
+    let boxes = get_boxes(&mut file, size, /*decode=*/ true)?;
     let mut info = MediaInfo {
         file: path.display().to_string(),
         major_brand: None,
@@ -99,7 +102,7 @@ fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-fn parse_ftyp(b: &JsonBox, info: &mut MediaInfo) {
+fn parse_ftyp(b: &Box, info: &mut MediaInfo) {
     let decoded = match &b.decoded {
         Some(s) => s,
         None => return,
@@ -118,7 +121,7 @@ fn parse_ftyp(b: &JsonBox, info: &mut MediaInfo) {
     }
 }
 
-fn parse_moov(b: &JsonBox, info: &mut MediaInfo) {
+fn parse_moov(b: &Box, info: &mut MediaInfo) {
     let children = match &b.children {
         Some(c) => c,
         None => return,
@@ -146,7 +149,7 @@ fn parse_moov(b: &JsonBox, info: &mut MediaInfo) {
     }
 }
 
-fn parse_trak(trak: &JsonBox, index: usize, info: &mut MediaInfo) {
+fn parse_trak(trak: &Box, index: usize, info: &mut MediaInfo) {
     let mut ti = TrackInfo {
         index,
         track_type: None,
@@ -248,7 +251,7 @@ fn parse_trak(trak: &JsonBox, index: usize, info: &mut MediaInfo) {
     info.tracks.push(ti);
 }
 
-fn find_child<'a>(parent: &'a JsonBox, typ: &str) -> Option<&'a JsonBox> {
+fn find_child<'a>(parent: &'a Box, typ: &str) -> Option<&'a Box> {
     parent
         .children
         .as_ref()

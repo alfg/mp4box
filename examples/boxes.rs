@@ -8,8 +8,11 @@ fn main() -> anyhow::Result<()> {
         std::process::exit(1);
     }
 
-    // Use the analyze_file function from the mp4box crate
-    let boxes = mp4box::analyze_file(&args[1], /*decode=*/ false)?;
+    let mut file = std::fs::File::open(&args[1])?;
+    let size = file.metadata()?.len();
+
+    // Use the get_boxes function from the mp4box crate
+    let boxes = mp4box::get_boxes(&mut file, size, /*decode=*/ false)?;
     println!("Top-level boxes: {}", boxes.len());
 
     // Example: print types of all top-level boxes

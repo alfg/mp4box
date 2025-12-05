@@ -2,7 +2,7 @@
 name = "mp4box"
 version = "0.4.0"
 edition = "2024"
-description = "Zero-copy(ish) MP4/ISOBMFF box explorer with custom-box (uuid) support"
+description = "Minimal MP4/ISOBMFF parser with JSON output, box decoding, and UUID support"
 license = "MIT"
 repository = "https://github.com/alfg/mp4box"
 

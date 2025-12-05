@@ -15,8 +15,11 @@ fn hex_range_reads_within_bounds() {
     let data: Vec<u8> = (0u8..64u8).collect();
     let path = temp_file(&data, "mp4box_hex_range_reads.bin");
 
+    let mut file = File::open(&path).expect("open temp file failed");
+    let file_size = file.metadata().expect("metadata failed").len();
+
     // Read 16 bytes starting at offset 16
-    let dump = hex_range(&path, 16, 16).expect("hex_range failed");
+    let dump = hex_range(&mut file, file_size, 16, 16).expect("hex_range failed");
 
     assert_eq!(dump.offset, 16);
     assert_eq!(dump.length, 16);
@@ -28,8 +31,11 @@ fn hex_range_clamps_to_eof() {
     let data: Vec<u8> = (0u8..32u8).collect();
     let path = temp_file(&data, "mp4box_hex_range_clamp.bin");
 
+    let mut file = File::open(&path).expect("open temp file failed");
+    let file_size = file.metadata().expect("metadata failed").len();
+
     // Ask for 32 bytes from offset 24; only 8 are available.
-    let dump = hex_range(&path, 24, 32).expect("hex_range failed");
+    let dump = hex_range(&mut file, file_size, 24, 32).expect("hex_range failed");
 
     assert_eq!(dump.offset, 24);
     assert_eq!(dump.length, 8);

@@ -14,7 +14,11 @@ fn main() -> anyhow::Result<()> {
     let offset: u64 = args[2].parse()?;
     let length: u64 = args[3].parse()?;
 
-    let dump = mp4box::hex_range(file_path, offset, length)?;
+    let mut file = std::fs::File::open(file_path)?;
+    let metadata = file.metadata()?;
+    let file_size = metadata.len();
+
+    let dump = mp4box::hex_range(&mut file, file_size, offset, length)?;
     println!("{}", dump.hex);
 
     Ok(())

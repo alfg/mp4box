@@ -6,59 +6,88 @@ use crate::{
 };
 use byteorder::ReadBytesExt;
 use serde::Serialize;
-use std::{
-    fs::File,
-    io::{Read, Seek, SeekFrom},
-    path::Path,
-};
+use std::io::{Read, Seek, SeekFrom};
 
 /// A JSON-serializable representation of a single MP4 box.
 ///
-/// This is designed for use in UIs (e.g. Tauri frontends) and for JSON output
-/// in tools like `mp4dump`.
+/// This structure contains all the metadata and content information about an MP4 box,
+/// making it suitable for serialization to JSON for use in web UIs, CLIs, or APIs.
 #[derive(Serialize)]
-pub struct JsonBox {
+pub struct Box {
+    /// Absolute byte offset of this box in the file
     pub offset: u64,
-    pub size: u64,
-    pub header_size: u64,            // <- new
-    pub payload_offset: Option<u64>, // <- new
-    pub payload_size: Option<u64>,   // <- new
+    /// Total size of this box including header and payload
+    pub size: u64, 
+    /// Size of just the box header (8 bytes for normal boxes, 16+ for large boxes)
+    pub header_size: u64,
+    /// Absolute offset where payload data starts (None for containers)
+    pub payload_offset: Option<u64>,
+    /// Size of payload data (None for containers)
+    pub payload_size: Option<u64>,
 
+    /// Four-character box type code (e.g., "ftyp", "moov")
     pub typ: String,
+    /// UUID for UUID boxes (16-byte hex string)
     pub uuid: Option<String>,
+    /// Version field for FullBox types
     pub version: Option<u8>,
+    /// Flags field for FullBox types  
     pub flags: Option<u32>,
+    /// Box classification: "leaf", "full", "container", or "unknown"
     pub kind: String,
+    /// Human-readable box type name (e.g., "File Type Box")
     pub full_name: String,
+    /// Decoded box content if decode=true and decoder available
     pub decoded: Option<String>,
-    pub children: Option<Vec<JsonBox>>,
+    /// Child boxes for container types
+    pub children: Option<Vec<Box>>,
 }
 
-/// Synchronous analysis function: parse MP4 and return a box tree.
-pub fn analyze_file(path: impl AsRef<Path>, decode: bool) -> anyhow::Result<Vec<JsonBox>> {
-    let mut f = File::open(&path)?;
-    let file_len = f.metadata()?.len();
+/// Parse an MP4/ISOBMFF file and return the complete box tree as JSON-serializable structures.
+///
+/// # Parameters
+/// - `r`: A reader that implements `Read + Seek` (e.g., `File`, `Cursor<Vec<u8>>`)
+/// - `size`: The total size of the MP4 data to parse (typically file length)  
+/// - `decode`: Whether to decode known box types using the default registry
+///
+/// # Returns
+/// A vector of `Box` structs representing the top-level boxes in the file.
+/// Each box contains metadata (offset, size, type) and optionally decoded content.
+///
+/// # Example
+/// ```no_run
+/// use mp4box::get_boxes;
+/// use std::fs::File;
+///
+/// let mut file = File::open("video.mp4")?;
+/// let size = file.metadata()?.len();
+/// let boxes = get_boxes(&mut file, size, true)?; // decode known boxes
+/// # Ok::<(), anyhow::Error>(())
+/// ```
+pub fn get_boxes<R: Read + Seek>(r: &mut R, size: u64, decode: bool) -> anyhow::Result<Vec<Box>> {
+    // let mut f = File::open(&path)?;
+    // let file_len = f.metadata()?.len();
 
     // parse top-level boxes
     let mut boxes = Vec::new();
-    while f.stream_position()? < file_len {
-        let h = read_box_header(&mut f)?;
+    while r.stream_position()? < size {
+        let h = read_box_header(r)?;
         let box_end = if h.size == 0 {
-            file_len
+            size
         } else {
             h.start + h.size
         };
 
         let kind = if crate::known_boxes::KnownBox::from(h.typ).is_container() {
-            f.seek(SeekFrom::Start(h.start + h.header_size))?;
-            NodeKind::Container(crate::parser::parse_children(&mut f, box_end)?)
+            r.seek(SeekFrom::Start(h.start + h.header_size))?;
+            NodeKind::Container(crate::parser::parse_children(r, box_end)?)
         } else if crate::known_boxes::KnownBox::from(h.typ).is_full_box() {
-            f.seek(SeekFrom::Start(h.start + h.header_size))?;
-            let version = f.read_u8()?;
+            r.seek(SeekFrom::Start(h.start + h.header_size))?;
+            let version = r.read_u8()?;
             let mut fl = [0u8; 3];
-            f.read_exact(&mut fl)?;
+            r.read_exact(&mut fl)?;
             let flags = ((fl[0] as u32) << 16) | ((fl[1] as u32) << 8) | (fl[2] as u32);
-            let data_offset = f.stream_position()?;
+            let data_offset = r.stream_position()?;
             let data_len = box_end.saturating_sub(data_offset);
             NodeKind::FullBox {
                 version,
@@ -82,16 +111,15 @@ pub fn analyze_file(path: impl AsRef<Path>, decode: bool) -> anyhow::Result<Vec<
             }
         };
 
-        f.seek(SeekFrom::Start(box_end))?;
+        r.seek(SeekFrom::Start(box_end))?;
         boxes.push(BoxRef { hdr: h, kind });
     }
 
     // build JSON tree
     let reg = default_registry();
-    let mut f2 = File::open(&path)?; // fresh handle for decoding
     let json_boxes = boxes
         .iter()
-        .map(|b| build_json_for_box(&mut f2, b, decode, &reg))
+        .map(|b| build_box(r, b, decode, &reg))
         .collect();
 
     Ok(json_boxes)
@@ -149,16 +177,16 @@ fn payload_geometry(b: &BoxRef) -> Option<(u64, u64)> {
     }
 }
 
-fn decode_value(f: &mut File, b: &BoxRef, reg: &Registry) -> Option<String> {
+fn decode_value<R: Read + Seek>(r: &mut R, b: &BoxRef, reg: &Registry) -> Option<String> {
     let (key, off, len) = payload_region(b)?;
     if len == 0 {
         return None;
     }
 
-    if f.seek(SeekFrom::Start(off)).is_err() {
+    if r.seek(SeekFrom::Start(off)).is_err() {
         return None;
     }
-    let mut limited = f.take(len);
+    let mut limited = r.take(len);
 
     if let Some(res) = reg.decode(&key, &mut limited, &b.hdr) {
         match res {
@@ -171,7 +199,7 @@ fn decode_value(f: &mut File, b: &BoxRef, reg: &Registry) -> Option<String> {
     }
 }
 
-fn build_json_for_box(f: &mut File, b: &BoxRef, decode: bool, reg: &Registry) -> JsonBox {
+fn build_box<R: Read + Seek>(r: &mut R, b: &BoxRef, decode: bool, reg: &Registry) -> Box {
     let hdr = &b.hdr;
     let uuid_str = hdr
         .uuid
@@ -195,19 +223,19 @@ fn build_json_for_box(f: &mut File, b: &BoxRef, decode: bool, reg: &Registry) ->
         NodeKind::Container(kids) => {
             let child_nodes = kids
                 .iter()
-                .map(|c| build_json_for_box(f, c, decode, reg))
+                .map(|c| build_box(r, c, decode, reg))
                 .collect();
             (None, None, "container".to_string(), Some(child_nodes))
         }
     };
 
     let decoded = if decode {
-        decode_value(f, b, reg)
+        decode_value(r, b, reg)
     } else {
         None
     };
 
-    JsonBox {
+    Box {
         offset: hdr.start,
         size: hdr.size,
         header_size,
@@ -225,39 +253,51 @@ fn build_json_for_box(f: &mut File, b: &BoxRef, decode: bool, reg: &Registry) ->
     }
 }
 
+/// Result of a hex dump operation containing the formatted hex output.
 #[derive(Serialize)]
 pub struct HexDump {
+    /// Starting offset of the dumped data
     pub offset: u64,
+    /// Actual number of bytes that were read and dumped
     pub length: u64,
+    /// Formatted hex dump string with addresses and ASCII representation
     pub hex: String,
 }
 
-/// Hex-dump a range of bytes from an MP4 file.
+/// Hex-dump a range of bytes from an MP4 data source.
 ///
-/// `max_len` controls the maximum number of bytes to read. This function
-/// never reads past EOF; if `offset + max_len` goes beyond the file size,
+/// # Parameters
+/// - `r`: A reader that implements `Read + Seek`
+/// - `size`: The total size of the data (typically file length)
+/// - `offset`: Byte offset to start reading from
+/// - `max_len`: Maximum number of bytes to read
+///
+/// This function never reads past EOF; if `offset + max_len` goes beyond the data size,
 /// the returned length will be smaller than `max_len`.
 ///
 /// This is useful for building a hex viewer UI:
 ///
 /// ```no_run
 /// use mp4box::hex_range;
+/// use std::fs::File;
 ///
 /// fn main() -> anyhow::Result<()> {
-///     let dump = hex_range("video.mp4", 0, 256)?;
+///     let mut file = File::open("video.mp4")?;
+///     let size = file.metadata()?.len();
+///     let dump = hex_range(&mut file, size, 0, 256)?;
 ///     println!("{}", dump.hex);
 ///     Ok(())
 /// }
 /// ```
-pub fn hex_range<P: AsRef<Path>>(path: P, offset: u64, max_len: u64) -> anyhow::Result<HexDump> {
+pub fn hex_range<R: Read + Seek>(r: &mut R, size: u64, offset: u64, max_len: u64) -> anyhow::Result<HexDump> {
     use std::cmp::min;
 
-    let path = path.as_ref().to_path_buf();
-    let mut f = File::open(&path)?;
-    let file_len = f.metadata()?.len();
+    // let path = path.as_ref().to_path_buf();
+    // let mut f = File::open(&path)?;
+    // let file_len = f.metadata()?.len();
 
     // How many bytes are actually available from this offset to EOF.
-    let available = file_len.saturating_sub(offset);
+    let available = size.saturating_sub(offset);
 
     // Don't read past EOF or more than the caller requested.
     let to_read = min(available, max_len);
@@ -271,7 +311,7 @@ pub fn hex_range<P: AsRef<Path>>(path: P, offset: u64, max_len: u64) -> anyhow::
         });
     }
 
-    let data = read_slice(&mut f, offset, to_read)?;
+    let data = read_slice(r, offset, to_read)?;
     let hex_str = hex_dump(&data, offset);
 
     Ok(HexDump {

@@ -492,8 +492,6 @@ fn build_json_for_box(f: &mut File, b: &BoxRef, decode: bool, reg: &Registry) ->
     }
 }
 
-// ---------- local copies to avoid exposing parser internals ----------
-
 fn is_container(h: &BoxHeader) -> bool {
     KnownBox::from(h.typ).is_container()
 }
