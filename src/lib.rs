@@ -40,7 +40,7 @@
 //!     
 //!     // Print file type info
 //!     if let Some(ftyp) = decoded_boxes.iter().find(|b| b.typ == "ftyp") {
-//!         println!("File type: {}", 
+//!         println!("File type: {}",
 //!             ftyp.decoded.as_deref().unwrap_or("unknown"));
 //!     }
 //!     
@@ -65,7 +65,7 @@
 //!     while file.stream_position()? < file_len {
 //!         let header = read_box_header(&mut file)?;
 //!         let known = KnownBox::from(header.typ);
-//!         println!("Box: {} ({}) at offset {:#x}", 
+//!         println!("Box: {} ({}) at offset {:#x}",
 //!             header.typ, known.full_name(), header.start);
 //!             
 //!         let end = if header.size == 0 { file_len } else { header.start + header.size };
@@ -77,16 +77,16 @@
 //!
 //! For more examples, see the `mp4dump` and `mp4info` binaries in this repository.
 
+pub mod api;
 pub mod boxes;
 pub mod known_boxes;
 pub mod parser;
 pub mod registry;
 pub mod util;
-pub mod api;
 
 pub use boxes::{BoxHeader, BoxKey, BoxRef, FourCC, NodeKind};
 pub use parser::{parse_children, read_box_header};
 pub use registry::{BoxValue, Registry};
 
 // High-level API
-pub use api::{get_boxes, hex_range, HexDump, Box};
+pub use api::{Box, HexDump, get_boxes, hex_range};

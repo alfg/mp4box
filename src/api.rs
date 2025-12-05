@@ -17,7 +17,7 @@ pub struct Box {
     /// Absolute byte offset of this box in the file
     pub offset: u64,
     /// Total size of this box including header and payload
-    pub size: u64, 
+    pub size: u64,
     /// Size of just the box header (8 bytes for normal boxes, 16+ for large boxes)
     pub header_size: u64,
     /// Absolute offset where payload data starts (None for containers)
@@ -72,11 +72,7 @@ pub fn get_boxes<R: Read + Seek>(r: &mut R, size: u64, decode: bool) -> anyhow::
     let mut boxes = Vec::new();
     while r.stream_position()? < size {
         let h = read_box_header(r)?;
-        let box_end = if h.size == 0 {
-            size
-        } else {
-            h.start + h.size
-        };
+        let box_end = if h.size == 0 { size } else { h.start + h.size };
 
         let kind = if crate::known_boxes::KnownBox::from(h.typ).is_container() {
             r.seek(SeekFrom::Start(h.start + h.header_size))?;
@@ -221,10 +217,7 @@ fn build_box<R: Read + Seek>(r: &mut R, b: &BoxRef, decode: bool, reg: &Registry
         NodeKind::Leaf { .. } => (None, None, "leaf".to_string(), None),
         NodeKind::Unknown { .. } => (None, None, "unknown".to_string(), None),
         NodeKind::Container(kids) => {
-            let child_nodes = kids
-                .iter()
-                .map(|c| build_box(r, c, decode, reg))
-                .collect();
+            let child_nodes = kids.iter().map(|c| build_box(r, c, decode, reg)).collect();
             (None, None, "container".to_string(), Some(child_nodes))
         }
     };
@@ -289,7 +282,12 @@ pub struct HexDump {
 ///     Ok(())
 /// }
 /// ```
-pub fn hex_range<R: Read + Seek>(r: &mut R, size: u64, offset: u64, max_len: u64) -> anyhow::Result<HexDump> {
+pub fn hex_range<R: Read + Seek>(
+    r: &mut R,
+    size: u64,
+    offset: u64,
+    max_len: u64,
+) -> anyhow::Result<HexDump> {
     use std::cmp::min;
 
     // let path = path.as_ref().to_path_buf();
