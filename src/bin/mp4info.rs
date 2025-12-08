@@ -186,35 +186,53 @@ fn parse_trak(trak: &Box, index: usize, info: &mut MediaInfo) {
     };
 
     // mdhd: timescale / duration / language
-    if let Some(mdhd) = find_child(mdia, "mdhd")
-        && let Some(decoded) = &mdhd.decoded
-    {
-        if let Some(ts) = parse_u32_field(decoded, "timescale=") {
-            ti.timescale = Some(ts);
+    if let Some(mdhd) = find_child(mdia, "mdhd") {
+        // Try structured data first
+        if let Some(mp4box::registry::StructuredData::MediaHeader(mdhd_data)) = &mdhd.structured_data {
+            ti.timescale = Some(mdhd_data.timescale);
+            ti.duration_ticks = Some(mdhd_data.duration as u64);
+            ti.duration_seconds = Some(mdhd_data.duration as f64 / mdhd_data.timescale as f64);
+            ti.language = Some(mdhd_data.language.clone());
         }
-        if let Some(dur) = parse_u64_field(decoded, "duration=") {
-            ti.duration_ticks = Some(dur);
-            if let Some(ts) = ti.timescale {
-                ti.duration_seconds = Some(dur as f64 / ts as f64);
+        // Fallback to text parsing
+        else if let Some(decoded) = &mdhd.decoded {
+            if let Some(ts) = parse_u32_field(decoded, "timescale=") {
+                ti.timescale = Some(ts);
             }
-        }
-        if let Some(lang) = parse_string_field(decoded, "language=") {
-            ti.language = Some(lang);
+            if let Some(dur) = parse_u64_field(decoded, "duration=") {
+                ti.duration_ticks = Some(dur);
+                if let Some(ts) = ti.timescale {
+                    ti.duration_seconds = Some(dur as f64 / ts as f64);
+                }
+            }
+            if let Some(lang) = parse_string_field(decoded, "language=") {
+                ti.language = Some(lang);
+            }
         }
     }
 
     // hdlr: determine track type (video/audio/other)
-    if let Some(hdlr) = find_child(mdia, "hdlr")
-        && let Some(decoded) = &hdlr.decoded
-    {
-        // Ideally your hdlr decoder now prints "handler=vide name=..."
-        if let Some(handler) = parse_string_field(decoded, "handler=") {
-            let tt = match handler.as_str() {
+    if let Some(hdlr) = find_child(mdia, "hdlr") {
+        // Try structured data first
+        if let Some(mp4box::registry::StructuredData::HandlerReference(hdlr_data)) = &hdlr.structured_data {
+            let tt = match hdlr_data.handler_type.as_str() {
                 "vide" => "video",
                 "soun" => "audio",
                 _ => "other",
             };
             ti.track_type = Some(tt.to_string());
+        }
+        // Fallback to text parsing
+        else if let Some(decoded) = &hdlr.decoded {
+            // Ideally your hdlr decoder now prints "handler=vide name=..."
+            if let Some(handler) = parse_string_field(decoded, "handler=") {
+                let tt = match handler.as_str() {
+                    "vide" => "video",
+                    "soun" => "audio",
+                    _ => "other",
+                };
+                ti.track_type = Some(tt.to_string());
+            }
         }
     }
 

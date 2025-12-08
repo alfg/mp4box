@@ -32,6 +32,10 @@ pub enum StructuredData {
     ChunkOffset(StcoData),
     /// 64-bit Chunk Offset Box (co64)
     ChunkOffset64(Co64Data),
+    /// Media Header Box (mdhd)
+    MediaHeader(MdhdData),
+    /// Handler Reference Box (hdlr)
+    HandlerReference(HdlrData),
 }
 
 /// Sample Description Box data
@@ -133,6 +137,27 @@ pub struct Co64Data {
     pub flags: u32,
     pub entry_count: u32,
     pub chunk_offsets: Vec<u64>,
+}
+
+/// Media Header Box data
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct MdhdData {
+    pub version: u8,
+    pub flags: u32,
+    pub creation_time: u32,
+    pub modification_time: u32,
+    pub timescale: u32,
+    pub duration: u32,
+    pub language: String,
+}
+
+/// Handler Reference Box data
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct HdlrData {
+    pub version: u8,
+    pub flags: u32,
+    pub handler_type: String,
+    pub name: String,
 }
 
 /// Trait for custom box decoders.
@@ -402,8 +427,8 @@ pub struct MdhdDecoder;
 
 impl BoxDecoder for MdhdDecoder {
     fn decode(&self, r: &mut dyn Read, _hdr: &BoxHeader) -> anyhow::Result<BoxValue> {
-        let _creation_time = r.read_u32::<BigEndian>()?;
-        let _modification_time = r.read_u32::<BigEndian>()?;
+        let creation_time = r.read_u32::<BigEndian>()?;
+        let modification_time = r.read_u32::<BigEndian>()?;
         let timescale = r.read_u32::<BigEndian>()?;
         let duration = r.read_u32::<BigEndian>()?;
         let language_code = r.read_u16::<BigEndian>()?;
@@ -411,10 +436,17 @@ impl BoxDecoder for MdhdDecoder {
 
         let lang = lang_from_u16(language_code);
 
-        Ok(BoxValue::Text(format!(
-            "timescale={} duration={} language={}",
-            timescale, duration, lang
-        )))
+        let data = MdhdData {
+            version: 0, // Version/flags are handled by the FullBox parsing layer
+            flags: 0,
+            creation_time,
+            modification_time,
+            timescale,
+            duration,
+            language: lang,
+        };
+
+        Ok(BoxValue::Structured(StructuredData::MediaHeader(data)))
     }
 }
 
@@ -445,10 +477,14 @@ impl BoxDecoder for HdlrDecoder {
 
         let handler_str = std::str::from_utf8(&handler_type).unwrap_or("????");
 
-        Ok(BoxValue::Text(format!(
-            "handler={} name=\"{}\"",
-            handler_str, name
-        )))
+        let data = HdlrData {
+            version: 0, // Version/flags are handled by the FullBox parsing layer
+            flags: 0,
+            handler_type: handler_str.to_string(),
+            name,
+        };
+
+        Ok(BoxValue::Structured(StructuredData::HandlerReference(data)))
     }
 }
 
