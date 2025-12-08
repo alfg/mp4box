@@ -20,7 +20,7 @@ pub enum StructuredData {
     SampleDescription(StsdData),
     /// Decoding Time-to-Sample Box (stts)
     DecodingTimeToSample(SttsData),
-    /// Composition Time-to-Sample Box (ctts) 
+    /// Composition Time-to-Sample Box (ctts)
     CompositionTimeToSample(CttsData),
     /// Sample-to-Chunk Box (stsc)
     SampleToChunk(StscData),
@@ -567,7 +567,9 @@ impl BoxDecoder for StsdDecoder {
             }],
         };
 
-        Ok(BoxValue::Structured(StructuredData::SampleDescription(data)))
+        Ok(BoxValue::Structured(StructuredData::SampleDescription(
+            data,
+        )))
     }
 }
 
@@ -605,7 +607,9 @@ impl BoxDecoder for SttsDecoder {
             entries,
         };
 
-        Ok(BoxValue::Structured(StructuredData::DecodingTimeToSample(data)))
+        Ok(BoxValue::Structured(StructuredData::DecodingTimeToSample(
+            data,
+        )))
     }
 }
 
@@ -681,7 +685,9 @@ impl BoxDecoder for CttsDecoder {
             entries,
         };
 
-        Ok(BoxValue::Structured(StructuredData::CompositionTimeToSample(data)))
+        Ok(BoxValue::Structured(
+            StructuredData::CompositionTimeToSample(data),
+        ))
     }
 }
 
@@ -780,7 +786,7 @@ impl BoxDecoder for StcoDecoder {
 
         let entry_count = cur.read_u32::<BigEndian>()?;
         let mut chunk_offsets = Vec::new();
-        
+
         for _ in 0..entry_count {
             chunk_offsets.push(cur.read_u32::<BigEndian>()?);
         }
@@ -813,7 +819,7 @@ impl BoxDecoder for Co64Decoder {
 
         let entry_count = cur.read_u32::<BigEndian>()?;
         let mut chunk_offsets = Vec::new();
-        
+
         for _ in 0..entry_count {
             chunk_offsets.push(cur.read_u64::<BigEndian>()?);
         }

@@ -6,7 +6,7 @@ use crate::{
 };
 use byteorder::ReadBytesExt;
 use serde::Serialize;
-use std::{io::{Read, Seek, SeekFrom}};
+use std::io::{Read, Seek, SeekFrom};
 
 /// A JSON-serializable representation of a single MP4 box.
 ///

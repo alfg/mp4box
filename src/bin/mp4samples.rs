@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use anyhow::Result;
 use clap::Parser;
-use mp4box::{get_boxes, SampleInfo};
+use mp4box::{SampleInfo, get_boxes};
 
 #[derive(Debug, Parser)]
 #[command(
@@ -66,7 +66,7 @@ fn main() -> Result<()> {
         print_sample_tables(&boxes, &args)?;
     } else {
         let tracks = extract_track_samples(&boxes)?;
-        
+
         if args.json {
             print_json(&tracks, &args)?;
         } else {
@@ -80,7 +80,7 @@ fn main() -> Result<()> {
 fn extract_track_samples(boxes: &[mp4box::Box]) -> Result<Vec<TrackInfo>> {
     let mut tracks = Vec::new();
     let mut track_counter = 1;
-    
+
     // Find moov box
     for box_info in boxes {
         if box_info.typ == "moov" {
@@ -98,7 +98,7 @@ fn extract_track_samples(boxes: &[mp4box::Box]) -> Result<Vec<TrackInfo>> {
             }
         }
     }
-    
+
     Ok(tracks)
 }
 
@@ -107,30 +107,30 @@ fn extract_single_track(trak_box: &mp4box::Box, track_counter: u32) -> Result<Op
     let track_id = extract_track_id(trak_box).unwrap_or(track_counter);
     let handler_type = extract_handler_type(trak_box).unwrap_or_else(|| "vide".to_string());
     let (timescale, duration) = extract_media_info(trak_box);
-    
+
     // Find stbl box for sample tables
     let stbl_box = find_stbl_box(trak_box);
     if stbl_box.is_none() {
         return Ok(None);
     }
-    
+
     let stbl = stbl_box.unwrap();
-    
+
     // Try to extract sample table data, return None if no samples found
     let sample_tables = match extract_sample_table_data(stbl) {
         Ok(data) => data,
         Err(_) => return Ok(None), // Skip tracks without valid sample data
     };
-    
+
     // Build samples from structured data
     let samples = build_samples(&sample_tables, timescale)?;
     let sample_count = samples.len() as u32;
-    
+
     // Skip empty tracks
     if sample_count == 0 {
         return Ok(None);
     }
-    
+
     Ok(Some(TrackInfo {
         track_id,
         handler_type,
@@ -148,7 +148,7 @@ fn extract_single_track(trak_box: &mp4box::Box, track_counter: u32) -> Result<Op
 #[derive(Debug, Default)]
 struct SampleTableData {
     stts_entries: u32,
-    stsc_entries: u32, 
+    stsc_entries: u32,
     stco_entries: u32,
     keyframe_count: u32,
     sample_count: u32,
@@ -236,7 +236,8 @@ fn extract_media_info(trak_box: &mp4box::Box) -> (u32, u64) {
                                     .unwrap_or(12288); // Common video timescale
                                 let duration = extract_number_from_decoded(decoded, "duration")
                                     .or_else(|| extract_number_from_decoded(decoded, "dur"))
-                                    .unwrap_or(0) as u64;
+                                    .unwrap_or(0)
+                                    as u64;
                                 return (timescale, duration);
                             }
                         }
@@ -250,7 +251,7 @@ fn extract_media_info(trak_box: &mp4box::Box) -> (u32, u64) {
 
 fn extract_sample_table_data(stbl_box: &mp4box::Box) -> Result<SampleTableData> {
     let mut data = SampleTableData::default();
-    
+
     if let Some(children) = &stbl_box.children {
         for child in children {
             if let Some(decoded) = &child.decoded {
@@ -259,29 +260,40 @@ fn extract_sample_table_data(stbl_box: &mp4box::Box) -> Result<SampleTableData> 
                 match child.typ.as_str() {
                     "stsz" => {
                         // Parse sample count and sizes from stsz
-                        if let Some(sample_count) = extract_number_from_decoded(decoded, "sample_count:") {
+                        if let Some(sample_count) =
+                            extract_number_from_decoded(decoded, "sample_count:")
+                        {
                             data.sample_count = sample_count;
                             // For individual sample sizes, try to extract them
-                            data.sample_sizes = extract_sample_sizes_from_decoded(decoded, sample_count);
+                            data.sample_sizes =
+                                extract_sample_sizes_from_decoded(decoded, sample_count);
                         }
                     }
                     "stts" => {
-                        if let Some(entry_count) = extract_number_from_decoded(decoded, "entry_count:") {
+                        if let Some(entry_count) =
+                            extract_number_from_decoded(decoded, "entry_count:")
+                        {
                             data.stts_entries = entry_count;
                         }
                     }
                     "stsc" => {
-                        if let Some(entry_count) = extract_number_from_decoded(decoded, "entry_count:") {
+                        if let Some(entry_count) =
+                            extract_number_from_decoded(decoded, "entry_count:")
+                        {
                             data.stsc_entries = entry_count;
                         }
                     }
                     "stco" | "co64" => {
-                        if let Some(entry_count) = extract_number_from_decoded(decoded, "entry_count:") {
+                        if let Some(entry_count) =
+                            extract_number_from_decoded(decoded, "entry_count:")
+                        {
                             data.stco_entries = entry_count;
                         }
                     }
                     "stss" => {
-                        if let Some(entry_count) = extract_number_from_decoded(decoded, "entry_count:") {
+                        if let Some(entry_count) =
+                            extract_number_from_decoded(decoded, "entry_count:")
+                        {
                             data.keyframe_count = entry_count;
                         }
                     }
@@ -290,46 +302,46 @@ fn extract_sample_table_data(stbl_box: &mp4box::Box) -> Result<SampleTableData> 
             }
         }
     }
-    
+
     // If we didn't find any sample data, return error
     if data.sample_count == 0 {
         return Err(anyhow::anyhow!("No sample data found in stbl box"));
     }
-    
+
     Ok(data)
 }
 
 fn build_samples(table_data: &SampleTableData, timescale: u32) -> Result<Vec<SampleInfo>> {
     let mut samples = Vec::new();
-    
+
     // Use default duration if we don't have real timing data
     // Try to detect the actual frame rate - 24fps is common for cinema content
-    let default_duration = if timescale > 0 { 
-        timescale / 24  // ~24fps default (more accurate than 30fps)
-    } else { 
-        1000 
+    let default_duration = if timescale > 0 {
+        timescale / 24 // ~24fps default (more accurate than 30fps)
+    } else {
+        1000
     };
-    
+
     for i in 0..table_data.sample_count {
         let duration = default_duration; // Would come from STTS in real implementation
         let dts = i as u64 * duration as u64;
         let pts = dts; // Would add CTTS offset in real implementation
-        
+
         let sample = SampleInfo {
             index: i,
             dts,
             pts,
             start_time: dts as f64 / timescale as f64,
             duration,
-            rendered_offset: 0, // From ctts if present
+            rendered_offset: 0,            // From ctts if present
             file_offset: i as u64 * 50000, // Rough estimate - would come from STCO
             size: if !table_data.sample_sizes.is_empty() {
-                if i < table_data.sample_sizes.len() as u32 { 
-                    table_data.sample_sizes[i as usize] 
-                } else { 
+                if i < table_data.sample_sizes.len() as u32 {
+                    table_data.sample_sizes[i as usize]
+                } else {
                     table_data.sample_sizes[0] // Use first size as default
                 }
-            } else { 
+            } else {
                 // Use a more reasonable default size
                 if i == 0 { 50000 } else { 5000 } // First sample larger (keyframe)
             },
@@ -337,7 +349,7 @@ fn build_samples(table_data: &SampleTableData, timescale: u32) -> Result<Vec<Sam
         };
         samples.push(sample);
     }
-    
+
     Ok(samples)
 }
 
@@ -366,7 +378,7 @@ fn extract_sample_sizes_from_decoded(decoded: &str, count: u32) -> Vec<u32> {
             return vec![uniform_size; count as usize];
         }
     }
-    
+
     // Try to extract individual sample sizes from the decoded string
     // Look for patterns like "sample_sizes: [1234, 5678, ...]"
     if decoded.contains("sample_sizes: [") {
@@ -381,14 +393,14 @@ fn extract_sample_sizes_from_decoded(decoded: &str, count: u32) -> Vec<u32> {
 fn print_sample_tables(boxes: &[mp4box::Box], args: &Args) -> Result<()> {
     println!("Sample Table Analysis for: {:?}", args.input);
     println!("=========================================");
-    
+
     analyze_boxes(boxes, 0, args);
     Ok(())
 }
 
 fn analyze_boxes(boxes: &[mp4box::Box], depth: usize, args: &Args) {
     let indent = "  ".repeat(depth);
-    
+
     for box_info in boxes {
         if let Some(decoded) = &box_info.decoded {
             match box_info.typ.as_str() {
@@ -447,7 +459,8 @@ fn analyze_boxes(boxes: &[mp4box::Box], depth: usize, args: &Args) {
 fn print_json(tracks: &[TrackInfo], args: &Args) -> Result<()> {
     use serde_json::json;
 
-    let filtered_tracks: Vec<_> = tracks.iter()
+    let filtered_tracks: Vec<_> = tracks
+        .iter()
         .filter(|t| args.track_id.map_or(true, |tid| t.track_id == tid))
         .collect();
 
@@ -465,7 +478,7 @@ fn print_json(tracks: &[TrackInfo], args: &Args) -> Result<()> {
                 "sample_count": t.sample_count,
                 "samples": samples,
             });
-            
+
             if args.verbose {
                 track_data["sample_tables"] = json!({
                     "stts_entries": t.stts_entries,
@@ -475,7 +488,7 @@ fn print_json(tracks: &[TrackInfo], args: &Args) -> Result<()> {
                     "keyframes": t.keyframe_count,
                 });
             }
-            
+
             track_data
         }).collect::<Vec<_>>()
     });
@@ -485,7 +498,8 @@ fn print_json(tracks: &[TrackInfo], args: &Args) -> Result<()> {
 }
 
 fn print_text(tracks: &[TrackInfo], args: &Args) -> Result<()> {
-    let filtered_tracks: Vec<_> = tracks.iter()
+    let filtered_tracks: Vec<_> = tracks
+        .iter()
         .filter(|t| args.track_id.map_or(true, |tid| t.track_id == tid))
         .collect();
 
@@ -494,7 +508,7 @@ fn print_text(tracks: &[TrackInfo], args: &Args) -> Result<()> {
             "Track {} ({}) timescale={} duration={} sample_count={}",
             t.track_id, t.handler_type, t.timescale, t.duration, t.sample_count
         );
-        
+
         if args.verbose {
             println!("  Sample Table Info:");
             println!("    STTS entries: {}", t.stts_entries);
@@ -503,7 +517,7 @@ fn print_text(tracks: &[TrackInfo], args: &Args) -> Result<()> {
             println!("    Keyframes: {}", t.keyframe_count);
             println!();
         }
-        
+
         if args.timing {
             println!("idx    DTS(ts)    PTS(ts)    start(s)   dur(ts)  size   offset      sync");
             println!("-------------------------------------------------------------------------");
@@ -515,9 +529,11 @@ fn print_text(tracks: &[TrackInfo], args: &Args) -> Result<()> {
         let mut count = 0usize;
         for s in &t.samples {
             if let Some(lim) = args.limit {
-                if count >= lim { break; }
+                if count >= lim {
+                    break;
+                }
             }
-            
+
             if args.timing {
                 println!(
                     "{:5} {:10} {:10} {:10.4} {:8} {:6} {:10} {}",
