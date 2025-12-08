@@ -78,10 +78,10 @@ pub struct SampleInfo {
 /// use mp4box::track_samples_from_path;
 ///
 /// let track_samples = track_samples_from_path("video.mp4").unwrap();
-/// 
+///
 /// for track in track_samples {
-///     println!("Track {}: {} ({} samples)", 
-///              track.track_id, 
+///     println!("Track {}: {} ({} samples)",
+///              track.track_id,
 ///              track.handler_type,
 ///              track.sample_count);
 ///              
@@ -142,7 +142,7 @@ pub struct TrackSamples {
 ///
 /// let file = File::open("video.mp4").unwrap();
 /// let track_samples = track_samples_from_reader(file).unwrap();
-/// 
+///
 /// for track in track_samples {
 ///     println!("Track {}: {} samples", track.track_id, track.sample_count);
 /// }
@@ -212,7 +212,7 @@ pub fn track_samples_from_reader<R: Read + Seek>(
 ///     let samples = track_samples_from_path(path)?;
 ///
 ///     for track in samples {
-///         println!("Track {} has {} samples of type {}", 
+///         println!("Track {} has {} samples of type {}",
 ///                  track.track_id, track.sample_count, track.handler_type);
 ///     }
 ///     Ok(())
@@ -333,7 +333,7 @@ fn find_track_id(trak_box: &crate::Box) -> anyhow::Result<u32> {
 
 fn find_media_info(trak_box: &crate::Box) -> anyhow::Result<(String, u32, u64)> {
     use crate::registry::StructuredData;
-    
+
     // Look for mdia/mdhd and mdia/hdlr boxes
     if let Some(children) = &trak_box.children {
         for child in children {
@@ -347,14 +347,18 @@ fn find_media_info(trak_box: &crate::Box) -> anyhow::Result<(String, u32, u64)> 
                 for mdia_child in mdia_children {
                     if mdia_child.typ == "mdhd" {
                         // Parse timescale and duration from mdhd
-                        if let Some(StructuredData::MediaHeader(mdhd_data)) = &mdia_child.structured_data {
+                        if let Some(StructuredData::MediaHeader(mdhd_data)) =
+                            &mdia_child.structured_data
+                        {
                             timescale = mdhd_data.timescale;
                             duration = mdhd_data.duration as u64;
                         }
                     }
                     if mdia_child.typ == "hdlr" {
                         // Parse handler type from hdlr
-                        if let Some(StructuredData::HandlerReference(hdlr_data)) = &mdia_child.structured_data {
+                        if let Some(StructuredData::HandlerReference(hdlr_data)) =
+                            &mdia_child.structured_data
+                        {
                             handler_type = hdlr_data.handler_type.clone();
                         }
                     }
@@ -445,8 +449,8 @@ fn extract_sample_tables(stbl_box: &crate::Box) -> anyhow::Result<SampleTables> 
                         tables.co64 = Some(data.clone());
                     }
                     // MediaHeader and HandlerReference are not sample table data, ignore them
-                    crate::registry::StructuredData::MediaHeader(_) => {},
-                    crate::registry::StructuredData::HandlerReference(_) => {},
+                    crate::registry::StructuredData::MediaHeader(_) => {}
+                    crate::registry::StructuredData::HandlerReference(_) => {}
                 }
             }
         }
@@ -571,32 +575,35 @@ fn get_composition_offset_from_ctts(
 
 fn get_sample_file_offset(tables: &SampleTables, sample_index: u32) -> u64 {
     // Calculate actual file offset using stsc + stco/co64 + stsz
-    
+
     let stsc = match &tables.stsc {
         Some(data) => data,
         None => return 0, // No chunk mapping available
     };
-    
+
     let stsz = match &tables.stsz {
         Some(data) => data,
         None => return 0, // No sample sizes available
     };
-    
+
     // Get chunk offsets (prefer 64-bit if available)
     let chunk_offsets: Vec<u64> = if let Some(co64) = &tables.co64 {
         co64.chunk_offsets.clone()
     } else if let Some(stco) = &tables.stco {
-        stco.chunk_offsets.iter().map(|&offset| offset as u64).collect()
+        stco.chunk_offsets
+            .iter()
+            .map(|&offset| offset as u64)
+            .collect()
     } else {
         return 0; // No chunk offsets available
     };
-    
+
     // Find which chunk contains this sample (1-based sample indexing in MP4)
     let target_sample = sample_index + 1;
     let mut current_sample = 1u32;
     let mut chunk_index = 0usize;
     let mut samples_per_chunk = 0u32;
-    
+
     for (i, entry) in stsc.entries.iter().enumerate() {
         // Calculate how many samples are covered by previous chunks with this entry's configuration
         let next_first_chunk = if i + 1 < stsc.entries.len() {
@@ -604,35 +611,36 @@ fn get_sample_file_offset(tables: &SampleTables, sample_index: u32) -> u64 {
         } else {
             chunk_offsets.len() as u32 + 1 // Beyond last chunk
         };
-        
+
         samples_per_chunk = entry.samples_per_chunk;
         let chunks_with_this_config = next_first_chunk - entry.first_chunk;
         let samples_in_this_range = chunks_with_this_config * samples_per_chunk;
-        
+
         if current_sample + samples_in_this_range > target_sample {
             // Target sample is in this range
             let sample_offset_in_range = target_sample - current_sample;
-            chunk_index = (entry.first_chunk - 1) as usize + (sample_offset_in_range / samples_per_chunk) as usize;
+            chunk_index = (entry.first_chunk - 1) as usize
+                + (sample_offset_in_range / samples_per_chunk) as usize;
             break;
         }
-        
+
         current_sample += samples_in_this_range;
     }
-    
+
     if chunk_index >= chunk_offsets.len() {
         return 0; // Chunk index out of bounds
     }
-    
+
     // Get the base offset of the chunk
     let chunk_offset = chunk_offsets[chunk_index];
-    
+
     // Calculate which sample within the chunk we want
     let sample_in_chunk = ((target_sample - current_sample) % samples_per_chunk) as usize;
-    
+
     // Sum up the sizes of preceding samples in this chunk to get the offset within chunk
     let mut offset_in_chunk = 0u64;
     let chunk_start_sample = current_sample as usize;
-    
+
     // Handle both fixed and variable sample sizes
     if stsz.sample_size > 0 {
         // Fixed sample size for all samples
@@ -646,6 +654,6 @@ fn get_sample_file_offset(tables: &SampleTables, sample_index: u32) -> u64 {
             }
         }
     }
-    
+
     chunk_offset + offset_in_chunk
 }

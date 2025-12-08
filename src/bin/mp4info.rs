@@ -188,7 +188,9 @@ fn parse_trak(trak: &Box, index: usize, info: &mut MediaInfo) {
     // mdhd: timescale / duration / language
     if let Some(mdhd) = find_child(mdia, "mdhd") {
         // Try structured data first
-        if let Some(mp4box::registry::StructuredData::MediaHeader(mdhd_data)) = &mdhd.structured_data {
+        if let Some(mp4box::registry::StructuredData::MediaHeader(mdhd_data)) =
+            &mdhd.structured_data
+        {
             ti.timescale = Some(mdhd_data.timescale);
             ti.duration_ticks = Some(mdhd_data.duration as u64);
             ti.duration_seconds = Some(mdhd_data.duration as f64 / mdhd_data.timescale as f64);
@@ -214,7 +216,9 @@ fn parse_trak(trak: &Box, index: usize, info: &mut MediaInfo) {
     // hdlr: determine track type (video/audio/other)
     if let Some(hdlr) = find_child(mdia, "hdlr") {
         // Try structured data first
-        if let Some(mp4box::registry::StructuredData::HandlerReference(hdlr_data)) = &hdlr.structured_data {
+        if let Some(mp4box::registry::StructuredData::HandlerReference(hdlr_data)) =
+            &hdlr.structured_data
+        {
             let tt = match hdlr_data.handler_type.as_str() {
                 "vide" => "video",
                 "soun" => "audio",

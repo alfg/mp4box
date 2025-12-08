@@ -25,7 +25,10 @@ mod tests {
         };
 
         let registry = default_registry();
-        let result = registry.decode(&BoxKey::FourCC(FourCC(*b"stts")), &mut cursor, &header).unwrap().unwrap();
+        let result = registry
+            .decode(&BoxKey::FourCC(FourCC(*b"stts")), &mut cursor, &header)
+            .unwrap()
+            .unwrap();
 
         match result {
             BoxValue::Structured(StructuredData::DecodingTimeToSample(stts_data)) => {
@@ -65,7 +68,10 @@ mod tests {
         };
 
         let registry = default_registry();
-        let result = registry.decode(&BoxKey::FourCC(FourCC(*b"stsz")), &mut cursor, &header).unwrap().unwrap();
+        let result = registry
+            .decode(&BoxKey::FourCC(FourCC(*b"stsz")), &mut cursor, &header)
+            .unwrap()
+            .unwrap();
 
         match result {
             BoxValue::Structured(StructuredData::SampleSize(stsz_data)) => {
@@ -106,7 +112,10 @@ mod tests {
         };
 
         let registry = default_registry();
-        let result = registry.decode(&BoxKey::FourCC(FourCC(*b"stsc")), &mut cursor, &header).unwrap().unwrap();
+        let result = registry
+            .decode(&BoxKey::FourCC(FourCC(*b"stsc")), &mut cursor, &header)
+            .unwrap()
+            .unwrap();
 
         match result {
             BoxValue::Structured(StructuredData::SampleToChunk(stsc_data)) => {
@@ -132,12 +141,12 @@ mod tests {
         // Create mock CTTS box data (without version/flags)
         let mock_data = vec![
             0, 0, 0, 3, // entry_count = 3
-            0, 0, 0, 5,   // sample_count = 5
-            0, 0, 1, 0,   // sample_offset = 256
-            0, 0, 0, 2,   // sample_count = 2
+            0, 0, 0, 5, // sample_count = 5
+            0, 0, 1, 0, // sample_offset = 256
+            0, 0, 0, 2, // sample_count = 2
             255, 255, 255, 0, // sample_offset = -256 (signed)
-            0, 0, 0, 1,   // sample_count = 1
-            0, 0, 2, 0,   // sample_offset = 512
+            0, 0, 0, 1, // sample_count = 1
+            0, 0, 2, 0, // sample_offset = 512
         ];
 
         let mut cursor = Cursor::new(mock_data);
@@ -150,7 +159,10 @@ mod tests {
         };
 
         let registry = default_registry();
-        let result = registry.decode(&BoxKey::FourCC(FourCC(*b"ctts")), &mut cursor, &header).unwrap().unwrap();
+        let result = registry
+            .decode(&BoxKey::FourCC(FourCC(*b"ctts")), &mut cursor, &header)
+            .unwrap()
+            .unwrap();
 
         match result {
             BoxValue::Structured(StructuredData::CompositionTimeToSample(ctts_data)) => {
@@ -193,7 +205,10 @@ mod tests {
         };
 
         let registry = default_registry();
-        let result = registry.decode(&BoxKey::FourCC(FourCC(*b"stss")), &mut cursor, &header).unwrap().unwrap();
+        let result = registry
+            .decode(&BoxKey::FourCC(FourCC(*b"stss")), &mut cursor, &header)
+            .unwrap()
+            .unwrap();
 
         match result {
             BoxValue::Structured(StructuredData::SyncSample(stss_data)) => {
@@ -231,7 +246,10 @@ mod tests {
         };
 
         let registry = default_registry();
-        let result = registry.decode(&BoxKey::FourCC(FourCC(*b"stco")), &mut cursor, &header).unwrap().unwrap();
+        let result = registry
+            .decode(&BoxKey::FourCC(FourCC(*b"stco")), &mut cursor, &header)
+            .unwrap()
+            .unwrap();
 
         match result {
             BoxValue::Structured(StructuredData::ChunkOffset(stco_data)) => {
@@ -267,7 +285,10 @@ mod tests {
         };
 
         let registry = default_registry();
-        let result = registry.decode(&BoxKey::FourCC(FourCC(*b"co64")), &mut cursor, &header).unwrap().unwrap();
+        let result = registry
+            .decode(&BoxKey::FourCC(FourCC(*b"co64")), &mut cursor, &header)
+            .unwrap()
+            .unwrap();
 
         match result {
             BoxValue::Structured(StructuredData::ChunkOffset64(co64_data)) => {
@@ -296,18 +317,15 @@ mod tests {
             0, 0, // pre_defined
             0, 0, // reserved
             0, 0, 0, 0, 0, 0, 0, 0, // pre_defined[3]
-            0, 0, 0, 0,
-            7, 128, // width = 1920
-            4, 56,  // height = 1080
+            0, 0, 0, 0, 7, 128, // width = 1920
+            4, 56, // height = 1080
             0, 72, 0, 0, // horizresolution = 72 dpi
             0, 72, 0, 0, // vertresolution = 72 dpi
             0, 0, 0, 0, // reserved
             0, 1, // frame_count = 1
             0, 0, 0, 0, 0, 0, 0, 0, // compressorname (32 bytes)
-            0, 0, 0, 0, 0, 0, 0, 0,
-            0, 0, 0, 0, 0, 0, 0, 0,
-            0, 0, 0, 0, 0, 0, 0, 0,
-            0, 24, // depth = 24
+            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+            24, // depth = 24
             255, 255, // pre_defined
         ];
 
@@ -321,7 +339,10 @@ mod tests {
         };
 
         let registry = default_registry();
-        let result = registry.decode(&BoxKey::FourCC(FourCC(*b"stsd")), &mut cursor, &header).unwrap().unwrap();
+        let result = registry
+            .decode(&BoxKey::FourCC(FourCC(*b"stsd")), &mut cursor, &header)
+            .unwrap()
+            .unwrap();
 
         match result {
             BoxValue::Structured(StructuredData::SampleDescription(stsd_data)) => {
@@ -352,8 +373,7 @@ mod tests {
             0, 0, 0, 0, 0, 0, // reserved
             0, 1, // data_reference_index = 1
             0, 0, 0, 0, // reserved[2]
-            0, 0, 0, 0,
-            0, 2, // channelcount = 2 (stereo)
+            0, 0, 0, 0, 0, 2, // channelcount = 2 (stereo)
             0, 16, // samplesize = 16 bits
             0, 0, // pre_defined
             0, 0, // reserved
@@ -370,7 +390,10 @@ mod tests {
         };
 
         let registry = default_registry();
-        let result = registry.decode(&BoxKey::FourCC(FourCC(*b"stsd")), &mut cursor, &header).unwrap().unwrap();
+        let result = registry
+            .decode(&BoxKey::FourCC(FourCC(*b"stsd")), &mut cursor, &header)
+            .unwrap()
+            .unwrap();
 
         match result {
             BoxValue::Structured(StructuredData::SampleDescription(stsd_data)) => {
