@@ -1,4 +1,4 @@
-use mp4box::{get_boxes, BoxValue, StructuredData};
+use mp4box::{BoxValue, StructuredData, get_boxes};
 use std::fs::File;
 
 fn main() -> anyhow::Result<()> {
@@ -24,7 +24,7 @@ fn main() -> anyhow::Result<()> {
 
 fn analyze_sample_tables(boxes: &[mp4box::Box], depth: usize) {
     let indent = "  ".repeat(depth);
-    
+
     for box_info in boxes {
         // Look for sample table boxes
         if let Some(decoded) = &box_info.decoded {
@@ -93,18 +93,18 @@ fn analyze_sample_tables(boxes: &[mp4box::Box], depth: usize) {
 /// Example of how you would access structured data directly from the registry
 #[allow(dead_code)]
 fn example_direct_parsing() -> anyhow::Result<()> {
-    use mp4box::registry::{default_registry, SttsDecoder, BoxDecoder};
     use mp4box::boxes::{BoxHeader, FourCC};
+    use mp4box::registry::{BoxDecoder, SttsDecoder, default_registry};
     use std::io::Cursor;
 
     // Example: Create a mock STTS box data
     let mock_stts_data = vec![
-        0, 0, 0, 0,           // version + flags
-        0, 0, 0, 2,           // entry_count = 2
-        0, 0, 0, 100,         // sample_count = 100
-        0, 0, 4, 0,           // sample_delta = 1024
-        0, 0, 0, 1,           // sample_count = 1  
-        0, 0, 2, 0,           // sample_delta = 512
+        0, 0, 0, 0, // version + flags
+        0, 0, 0, 2, // entry_count = 2
+        0, 0, 0, 100, // sample_count = 100
+        0, 0, 4, 0, // sample_delta = 1024
+        0, 0, 0, 1, // sample_count = 1
+        0, 0, 2, 0, // sample_delta = 512
     ];
 
     let mut cursor = Cursor::new(mock_stts_data);
@@ -125,10 +125,12 @@ fn example_direct_parsing() -> anyhow::Result<()> {
             println!("  Version: {}", stts_data.version);
             println!("  Flags: {}", stts_data.flags);
             println!("  Entry count: {}", stts_data.entry_count);
-            
+
             for (i, entry) in stts_data.entries.iter().enumerate() {
-                println!("  Entry {}: {} samples, delta {}", 
-                         i, entry.sample_count, entry.sample_delta);
+                println!(
+                    "  Entry {}: {} samples, delta {}",
+                    i, entry.sample_count, entry.sample_delta
+                );
             }
         }
         _ => println!("Unexpected result type"),
