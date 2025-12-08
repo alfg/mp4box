@@ -586,16 +586,33 @@ fn get_sample_file_offset(tables: &SampleTables, sample_index: u32) -> u64 {
         None => return 0, // No sample sizes available
     };
 
-    // Get chunk offsets (prefer 64-bit if available)
-    let chunk_offsets: Vec<u64> = if let Some(co64) = &tables.co64 {
-        co64.chunk_offsets.clone()
+    // Get chunk offsets reference (prefer 64-bit if available)
+    let (chunk_offsets_64, chunk_offsets_32) = if let Some(co64) = &tables.co64 {
+        (Some(&co64.chunk_offsets), None)
     } else if let Some(stco) = &tables.stco {
-        stco.chunk_offsets
-            .iter()
-            .map(|&offset| offset as u64)
-            .collect()
+        (None, Some(&stco.chunk_offsets))
     } else {
         return 0; // No chunk offsets available
+    };
+
+    // Helper function to get chunk offset by index
+    let get_chunk_offset = |index: usize| -> u64 {
+        if let Some(offsets_64) = chunk_offsets_64 {
+            offsets_64.get(index).copied().unwrap_or(0)
+        } else if let Some(offsets_32) = chunk_offsets_32 {
+            offsets_32.get(index).copied().unwrap_or(0) as u64
+        } else {
+            0
+        }
+    };
+
+    // Get chunk count
+    let chunk_count = if let Some(offsets_64) = chunk_offsets_64 {
+        offsets_64.len()
+    } else if let Some(offsets_32) = chunk_offsets_32 {
+        offsets_32.len()
+    } else {
+        0
     };
 
     // Find which chunk contains this sample (1-based sample indexing in MP4)
@@ -611,7 +628,7 @@ fn get_sample_file_offset(tables: &SampleTables, sample_index: u32) -> u64 {
         let next_first_chunk = if i + 1 < stsc.entries.len() {
             stsc.entries[i + 1].first_chunk
         } else {
-            chunk_offsets.len() as u32 + 1 // Beyond last chunk
+            chunk_count as u32 + 1 // Beyond last chunk
         };
 
         samples_per_chunk = entry.samples_per_chunk;
@@ -632,12 +649,12 @@ fn get_sample_file_offset(tables: &SampleTables, sample_index: u32) -> u64 {
             (current_sample as u64 + samples_in_this_range).min(u32::MAX as u64) as u32;
     }
 
-    if chunk_index >= chunk_offsets.len() {
+    if chunk_index >= chunk_count {
         return 0; // Chunk index out of bounds
     }
 
     // Get the base offset of the chunk
-    let chunk_offset = chunk_offsets[chunk_index];
+    let chunk_offset = get_chunk_offset(chunk_index);
 
     // Calculate which sample within the chunk we want
     // Values were already calculated when breaking out of the loop
