@@ -165,7 +165,7 @@ pub struct HdlrData {
 /// A decoder is responsible for interpreting the payload of a specific box
 /// (identified by a [`BoxKey`]) and returning a [`BoxValue`].
 pub trait BoxDecoder: Send + Sync {
-    fn decode(&self, r: &mut dyn Read, hdr: &BoxHeader) -> anyhow::Result<BoxValue>;
+    fn decode(&self, r: &mut dyn Read, hdr: &BoxHeader, version: Option<u8>, flags: Option<u32>) -> anyhow::Result<BoxValue>;
 }
 
 /// Registry of decoders keyed by `BoxKey` (4CC or UUID).
@@ -211,8 +211,10 @@ impl Registry {
         key: &BoxKey,
         r: &mut dyn Read,
         hdr: &BoxHeader,
+        version: Option<u8>,
+        flags: Option<u32>,
     ) -> Option<anyhow::Result<BoxValue>> {
-        self.map.get(key).map(|d| d.inner.decode(r, hdr))
+        self.map.get(key).map(|d| d.inner.decode(r, hdr, version, flags))
     }
 }
 
@@ -246,7 +248,7 @@ fn lang_from_u16(code: u16) -> String {
 pub struct FtypDecoder;
 
 impl BoxDecoder for FtypDecoder {
-    fn decode(&self, r: &mut dyn Read, _hdr: &BoxHeader) -> anyhow::Result<BoxValue> {
+    fn decode(&self, r: &mut dyn Read, _hdr: &BoxHeader, _version: Option<u8>, _flags: Option<u32>) -> anyhow::Result<BoxValue> {
         let buf = read_all(r)?;
         if buf.len() < 8 {
             return Ok(BoxValue::Text(format!(
@@ -280,7 +282,7 @@ impl BoxDecoder for FtypDecoder {
 pub struct MvhdDecoder;
 
 impl BoxDecoder for MvhdDecoder {
-    fn decode(&self, r: &mut dyn Read, _hdr: &BoxHeader) -> anyhow::Result<BoxValue> {
+    fn decode(&self, r: &mut dyn Read, _hdr: &BoxHeader, _version: Option<u8>, _flags: Option<u32>) -> anyhow::Result<BoxValue> {
         let buf = read_all(r)?;
         let mut cur = Cursor::new(&buf);
 
@@ -316,7 +318,7 @@ impl BoxDecoder for MvhdDecoder {
 pub struct TkhdDecoder;
 
 impl BoxDecoder for TkhdDecoder {
-    fn decode(&self, r: &mut dyn Read, _hdr: &BoxHeader) -> anyhow::Result<BoxValue> {
+    fn decode(&self, r: &mut dyn Read, _hdr: &BoxHeader, _version: Option<u8>, _flags: Option<u32>) -> anyhow::Result<BoxValue> {
         let buf = read_all(r)?;
         if buf.len() < 4 {
             return Ok(BoxValue::Text(format!(
@@ -426,7 +428,7 @@ impl BoxDecoder for TkhdDecoder {
 pub struct MdhdDecoder;
 
 impl BoxDecoder for MdhdDecoder {
-    fn decode(&self, r: &mut dyn Read, _hdr: &BoxHeader) -> anyhow::Result<BoxValue> {
+    fn decode(&self, r: &mut dyn Read, _hdr: &BoxHeader, version: Option<u8>, flags: Option<u32>) -> anyhow::Result<BoxValue> {
         let creation_time = r.read_u32::<BigEndian>()?;
         let modification_time = r.read_u32::<BigEndian>()?;
         let timescale = r.read_u32::<BigEndian>()?;
@@ -437,8 +439,8 @@ impl BoxDecoder for MdhdDecoder {
         let lang = lang_from_u16(language_code);
 
         let data = MdhdData {
-            version: 0, // Version/flags are handled by the FullBox parsing layer
-            flags: 0,
+            version: version.unwrap_or(0),
+            flags: flags.unwrap_or(0),
             creation_time,
             modification_time,
             timescale,
@@ -454,7 +456,7 @@ impl BoxDecoder for MdhdDecoder {
 pub struct HdlrDecoder;
 
 impl BoxDecoder for HdlrDecoder {
-    fn decode(&self, r: &mut dyn Read, _hdr: &BoxHeader) -> anyhow::Result<BoxValue> {
+    fn decode(&self, r: &mut dyn Read, _hdr: &BoxHeader, version: Option<u8>, flags: Option<u32>) -> anyhow::Result<BoxValue> {
         use byteorder::{BigEndian, ReadBytesExt};
 
         // pre_defined (4 bytes) + handler_type (4 bytes)
@@ -478,8 +480,8 @@ impl BoxDecoder for HdlrDecoder {
         let handler_str = std::str::from_utf8(&handler_type).unwrap_or("????");
 
         let data = HdlrData {
-            version: 0, // Version/flags are handled by the FullBox parsing layer
-            flags: 0,
+            version: version.unwrap_or(0),
+            flags: flags.unwrap_or(0),
             handler_type: handler_str.to_string(),
             name,
         };
@@ -492,7 +494,7 @@ impl BoxDecoder for HdlrDecoder {
 pub struct SidxDecoder;
 
 impl BoxDecoder for SidxDecoder {
-    fn decode(&self, r: &mut dyn Read, _hdr: &BoxHeader) -> anyhow::Result<BoxValue> {
+    fn decode(&self, r: &mut dyn Read, _hdr: &BoxHeader, _version: Option<u8>, _flags: Option<u32>) -> anyhow::Result<BoxValue> {
         let buf = read_all(r)?;
         let mut cur = Cursor::new(&buf);
 
@@ -531,7 +533,7 @@ impl BoxDecoder for SidxDecoder {
 pub struct StsdDecoder;
 
 impl BoxDecoder for StsdDecoder {
-    fn decode(&self, r: &mut dyn Read, _hdr: &BoxHeader) -> anyhow::Result<BoxValue> {
+    fn decode(&self, r: &mut dyn Read, _hdr: &BoxHeader, _version: Option<u8>, _flags: Option<u32>) -> anyhow::Result<BoxValue> {
         use byteorder::{BigEndian, ReadBytesExt};
 
         // stsd is a FullBox; our reader is already positioned at payload:
@@ -613,7 +615,7 @@ impl BoxDecoder for StsdDecoder {
 pub struct SttsDecoder;
 
 impl BoxDecoder for SttsDecoder {
-    fn decode(&self, r: &mut dyn Read, _hdr: &BoxHeader) -> anyhow::Result<BoxValue> {
+    fn decode(&self, r: &mut dyn Read, _hdr: &BoxHeader, version: Option<u8>, flags: Option<u32>) -> anyhow::Result<BoxValue> {
         let buf = read_all(r)?;
         let mut cur = Cursor::new(&buf);
 
@@ -631,11 +633,9 @@ impl BoxDecoder for SttsDecoder {
             });
         }
 
-        // Note: We don't have access to the actual version/flags here since they're
-        // parsed separately. We use placeholder values.
         let data = SttsData {
-            version: 0, // Placeholder - actual version parsed separately
-            flags: 0,   // Placeholder - actual flags parsed separately
+            version: version.unwrap_or(0),
+            flags: flags.unwrap_or(0),
             entry_count,
             entries,
         };
@@ -650,7 +650,7 @@ impl BoxDecoder for SttsDecoder {
 pub struct StssDecoder;
 
 impl BoxDecoder for StssDecoder {
-    fn decode(&self, r: &mut dyn Read, _hdr: &BoxHeader) -> anyhow::Result<BoxValue> {
+    fn decode(&self, r: &mut dyn Read, _hdr: &BoxHeader, version: Option<u8>, flags: Option<u32>) -> anyhow::Result<BoxValue> {
         let buf = read_all(r)?;
         let mut cur = Cursor::new(&buf);
 
@@ -663,8 +663,8 @@ impl BoxDecoder for StssDecoder {
         }
 
         let data = StssData {
-            version: 0, // Placeholder - actual version parsed separately
-            flags: 0,   // Placeholder - actual flags parsed separately
+            version: version.unwrap_or(0),
+            flags: flags.unwrap_or(0),
             entry_count,
             sample_numbers,
         };
@@ -677,7 +677,7 @@ impl BoxDecoder for StssDecoder {
 pub struct CttsDecoder;
 
 impl BoxDecoder for CttsDecoder {
-    fn decode(&self, r: &mut dyn Read, _hdr: &BoxHeader) -> anyhow::Result<BoxValue> {
+    fn decode(&self, r: &mut dyn Read, _hdr: &BoxHeader, version: Option<u8>, flags: Option<u32>) -> anyhow::Result<BoxValue> {
         let buf = read_all(r)?;
         let mut cur = Cursor::new(&buf);
 
@@ -697,8 +697,8 @@ impl BoxDecoder for CttsDecoder {
         }
 
         let data = CttsData {
-            version: 0, // Placeholder - actual version parsed separately
-            flags: 0,   // Placeholder - actual flags parsed separately
+            version: version.unwrap_or(0),
+            flags: flags.unwrap_or(0),
             entry_count,
             entries,
         };
@@ -713,7 +713,7 @@ impl BoxDecoder for CttsDecoder {
 pub struct StscDecoder;
 
 impl BoxDecoder for StscDecoder {
-    fn decode(&self, r: &mut dyn Read, _hdr: &BoxHeader) -> anyhow::Result<BoxValue> {
+    fn decode(&self, r: &mut dyn Read, _hdr: &BoxHeader, version: Option<u8>, flags: Option<u32>) -> anyhow::Result<BoxValue> {
         let buf = read_all(r)?;
         let mut cur = Cursor::new(&buf);
 
@@ -733,8 +733,8 @@ impl BoxDecoder for StscDecoder {
         }
 
         let data = StscData {
-            version: 0, // Placeholder - actual version parsed separately
-            flags: 0,   // Placeholder - actual flags parsed separately
+            version: version.unwrap_or(0),
+            flags: flags.unwrap_or(0),
             entry_count,
             entries,
         };
@@ -747,7 +747,7 @@ impl BoxDecoder for StscDecoder {
 pub struct StszDecoder;
 
 impl BoxDecoder for StszDecoder {
-    fn decode(&self, r: &mut dyn Read, _hdr: &BoxHeader) -> anyhow::Result<BoxValue> {
+    fn decode(&self, r: &mut dyn Read, _hdr: &BoxHeader, version: Option<u8>, flags: Option<u32>) -> anyhow::Result<BoxValue> {
         let buf = read_all(r)?;
         let mut cur = Cursor::new(&buf);
 
@@ -764,8 +764,8 @@ impl BoxDecoder for StszDecoder {
         }
 
         let data = StszData {
-            version: 0, // Placeholder - actual version parsed separately
-            flags: 0,   // Placeholder - actual flags parsed separately
+            version: version.unwrap_or(0),
+            flags: flags.unwrap_or(0),
             sample_size,
             sample_count,
             sample_sizes,
@@ -779,7 +779,7 @@ impl BoxDecoder for StszDecoder {
 pub struct StcoDecoder;
 
 impl BoxDecoder for StcoDecoder {
-    fn decode(&self, r: &mut dyn Read, _hdr: &BoxHeader) -> anyhow::Result<BoxValue> {
+    fn decode(&self, r: &mut dyn Read, _hdr: &BoxHeader, version: Option<u8>, flags: Option<u32>) -> anyhow::Result<BoxValue> {
         let buf = read_all(r)?;
         let mut cur = Cursor::new(&buf);
 
@@ -792,8 +792,8 @@ impl BoxDecoder for StcoDecoder {
         }
 
         let data = StcoData {
-            version: 0, // Placeholder - actual version parsed separately
-            flags: 0,   // Placeholder - actual flags parsed separately
+            version: version.unwrap_or(0),
+            flags: flags.unwrap_or(0),
             entry_count,
             chunk_offsets,
         };
@@ -806,7 +806,7 @@ impl BoxDecoder for StcoDecoder {
 pub struct Co64Decoder;
 
 impl BoxDecoder for Co64Decoder {
-    fn decode(&self, r: &mut dyn Read, _hdr: &BoxHeader) -> anyhow::Result<BoxValue> {
+    fn decode(&self, r: &mut dyn Read, _hdr: &BoxHeader, version: Option<u8>, flags: Option<u32>) -> anyhow::Result<BoxValue> {
         let buf = read_all(r)?;
         let mut cur = Cursor::new(&buf);
 
@@ -819,8 +819,8 @@ impl BoxDecoder for Co64Decoder {
         }
 
         let data = Co64Data {
-            version: 0, // Placeholder - actual version parsed separately
-            flags: 0,   // Placeholder - actual flags parsed separately
+            version: version.unwrap_or(0),
+            flags: flags.unwrap_or(0),
             entry_count,
             chunk_offsets,
         };
@@ -833,7 +833,7 @@ impl BoxDecoder for Co64Decoder {
 pub struct ElstDecoder;
 
 impl BoxDecoder for ElstDecoder {
-    fn decode(&self, r: &mut dyn Read, _hdr: &BoxHeader) -> anyhow::Result<BoxValue> {
+    fn decode(&self, r: &mut dyn Read, _hdr: &BoxHeader, _version: Option<u8>, _flags: Option<u32>) -> anyhow::Result<BoxValue> {
         let buf = read_all(r)?;
         if buf.len() < 8 {
             return Ok(BoxValue::Text(format!(

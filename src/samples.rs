@@ -614,17 +614,19 @@ fn get_sample_file_offset(tables: &SampleTables, sample_index: u32) -> u64 {
 
         samples_per_chunk = entry.samples_per_chunk;
         let chunks_with_this_config = next_first_chunk - entry.first_chunk;
-        let samples_in_this_range = chunks_with_this_config * samples_per_chunk;
+        let samples_in_this_range = (chunks_with_this_config as u64)
+            .saturating_mul(samples_per_chunk as u64);
 
-        if current_sample + samples_in_this_range > target_sample {
+        if (current_sample as u64) + samples_in_this_range > target_sample as u64 {
             // Target sample is in this range
+            // First, find the chunk containing the sample within this range
             let sample_offset_in_range = target_sample - current_sample;
-            chunk_index = (entry.first_chunk - 1) as usize
-                + (sample_offset_in_range / samples_per_chunk) as usize;
+            let chunk_offset_in_range = sample_offset_in_range / samples_per_chunk;
+            chunk_index = (entry.first_chunk - 1) as usize + chunk_offset_in_range as usize;
             break;
         }
 
-        current_sample += samples_in_this_range;
+        current_sample = (current_sample as u64 + samples_in_this_range).min(u32::MAX as u64) as u32;
     }
 
     if chunk_index >= chunk_offsets.len() {
@@ -635,11 +637,15 @@ fn get_sample_file_offset(tables: &SampleTables, sample_index: u32) -> u64 {
     let chunk_offset = chunk_offsets[chunk_index];
 
     // Calculate which sample within the chunk we want
-    let sample_in_chunk = ((target_sample - current_sample) % samples_per_chunk) as usize;
+    // Need to recalculate since we need the offset within the specific chunk
+    let sample_offset_in_range = target_sample - current_sample;
+    let chunk_offset_in_range = sample_offset_in_range / samples_per_chunk;
+    let sample_in_chunk = (sample_offset_in_range % samples_per_chunk) as usize;
 
     // Sum up the sizes of preceding samples in this chunk to get the offset within chunk
     let mut offset_in_chunk = 0u64;
-    let chunk_start_sample = current_sample as usize;
+    // The chunk_start_sample is the first sample in this specific chunk (0-based for array indexing)
+    let chunk_start_sample = (current_sample - 1 + chunk_offset_in_range * samples_per_chunk) as usize;
 
     // Handle both fixed and variable sample sizes
     if stsz.sample_size > 0 {

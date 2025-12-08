@@ -19,6 +19,10 @@ fn main() -> anyhow::Result<()> {
     println!("Analyzing sample tables in: {}", path);
     analyze_sample_tables(&boxes, 0);
 
+    // Also test the direct parsing example
+    println!("\nTesting direct parsing example:");
+    example_direct_parsing()?;
+
     Ok(())
 }
 
@@ -91,15 +95,14 @@ fn analyze_sample_tables(boxes: &[mp4box::Box], depth: usize) {
 }
 
 /// Example of how you would access structured data directly from the registry
-#[allow(dead_code)]
 fn example_direct_parsing() -> anyhow::Result<()> {
     use mp4box::boxes::{BoxHeader, FourCC};
     use mp4box::registry::{BoxDecoder, SttsDecoder};
     use std::io::Cursor;
 
     // Example: Create a mock STTS box data
+    // Note: version/flags are handled by the main parser, decoder receives only payload
     let mock_stts_data = vec![
-        0, 0, 0, 0, // version + flags
         0, 0, 0, 2, // entry_count = 2
         0, 0, 0, 100, // sample_count = 100
         0, 0, 4, 0, // sample_delta = 1024
@@ -111,13 +114,13 @@ fn example_direct_parsing() -> anyhow::Result<()> {
     let header = BoxHeader {
         typ: FourCC(*b"stts"),
         uuid: None,
-        size: 32,
+        size: 28, // 20 bytes data + 8 bytes header
         header_size: 8,
         start: 0,
     };
 
     let decoder = SttsDecoder;
-    let result = decoder.decode(&mut cursor, &header)?;
+    let result = decoder.decode(&mut cursor, &header, Some(0), Some(0))?;
 
     match result {
         BoxValue::Structured(StructuredData::DecodingTimeToSample(stts_data)) => {

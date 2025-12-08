@@ -193,7 +193,13 @@ fn decode_value<R: Read + Seek>(
     }
     let mut limited = r.take(len);
 
-    if let Some(res) = reg.decode(&key, &mut limited, &b.hdr) {
+    // Extract version and flags from the box if it's a FullBox
+    let (version, flags) = match &b.kind {
+        crate::boxes::NodeKind::FullBox { version, flags, .. } => (Some(*version), Some(*flags)),
+        _ => (None, None),
+    };
+
+    if let Some(res) = reg.decode(&key, &mut limited, &b.hdr, version, flags) {
         match res {
             Ok(BoxValue::Text(s)) => (Some(s), None),
             Ok(BoxValue::Bytes(bytes)) => (Some(format!("{} bytes", bytes.len())), None),

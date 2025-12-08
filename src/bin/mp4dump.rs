@@ -235,7 +235,13 @@ fn decode_value(f: &mut File, b: &BoxRef, reg: &Registry) -> Option<String> {
     }
     let mut limited = f.take(len);
 
-    if let Some(res) = reg.decode(&key, &mut limited, &b.hdr) {
+    // Extract version and flags from the box if it's a FullBox
+    let (version, flags) = match &b.kind {
+        mp4box::boxes::NodeKind::FullBox { version, flags, .. } => (Some(*version), Some(*flags)),
+        _ => (None, None),
+    };
+
+    if let Some(res) = reg.decode(&key, &mut limited, &b.hdr, version, flags) {
         match res {
             Ok(BoxValue::Text(s)) => Some(s),
             Ok(BoxValue::Bytes(bytes)) => Some(format!("{} bytes", bytes.len())),
