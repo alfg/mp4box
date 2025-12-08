@@ -84,18 +84,19 @@ fn extract_track_samples(boxes: &[mp4box::Box]) -> Result<Vec<TrackInfo>> {
     // Find moov box
     for box_info in boxes {
         if box_info.typ == "moov"
-            && let Some(children) = &box_info.children {
-                // Find trak boxes
-                for trak_box in children.iter().filter(|b| b.typ == "trak") {
-                    if let Some(track_info) = extract_single_track(trak_box, track_counter)? {
-                        // Only add track if it has samples
-                        if track_info.sample_count > 0 {
-                            tracks.push(track_info);
-                            track_counter += 1;
-                        }
+            && let Some(children) = &box_info.children
+        {
+            // Find trak boxes
+            for trak_box in children.iter().filter(|b| b.typ == "trak") {
+                if let Some(track_info) = extract_single_track(trak_box, track_counter)? {
+                    // Only add track if it has samples
+                    if track_info.sample_count > 0 {
+                        tracks.push(track_info);
+                        track_counter += 1;
                     }
                 }
             }
+        }
     }
 
     Ok(tracks)
@@ -159,18 +160,20 @@ fn find_stbl_box(trak_box: &mp4box::Box) -> Option<&mp4box::Box> {
     if let Some(children) = &trak_box.children {
         for child in children {
             if child.typ == "mdia"
-                && let Some(mdia_children) = &child.children {
-                    for mdia_child in mdia_children {
-                        if mdia_child.typ == "minf"
-                            && let Some(minf_children) = &mdia_child.children {
-                                for minf_child in minf_children {
-                                    if minf_child.typ == "stbl" {
-                                        return Some(minf_child);
-                                    }
-                                }
+                && let Some(mdia_children) = &child.children
+            {
+                for mdia_child in mdia_children {
+                    if mdia_child.typ == "minf"
+                        && let Some(minf_children) = &mdia_child.children
+                    {
+                        for minf_child in minf_children {
+                            if minf_child.typ == "stbl" {
+                                return Some(minf_child);
                             }
+                        }
                     }
                 }
+            }
         }
     }
     None
@@ -182,9 +185,10 @@ fn extract_track_id(trak_box: &mp4box::Box) -> Option<u32> {
     if let Some(children) = &trak_box.children {
         for child in children {
             if child.typ == "tkhd"
-                && let Some(decoded) = &child.decoded {
-                    return extract_number_from_decoded(decoded, "track_id");
-                }
+                && let Some(decoded) = &child.decoded
+            {
+                return extract_number_from_decoded(decoded, "track_id");
+            }
         }
     }
     None
@@ -195,21 +199,23 @@ fn extract_handler_type(trak_box: &mp4box::Box) -> Option<String> {
     if let Some(children) = &trak_box.children {
         for child in children {
             if child.typ == "mdia"
-                && let Some(mdia_children) = &child.children {
-                    for mdia_child in mdia_children {
-                        if mdia_child.typ == "hdlr"
-                            && let Some(decoded) = &mdia_child.decoded {
-                                // Look for handler type in decoded string
-                                if decoded.contains("vide") {
-                                    return Some("vide".to_string());
-                                } else if decoded.contains("soun") {
-                                    return Some("soun".to_string());
-                                } else if decoded.contains("text") {
-                                    return Some("text".to_string());
-                                }
-                            }
+                && let Some(mdia_children) = &child.children
+            {
+                for mdia_child in mdia_children {
+                    if mdia_child.typ == "hdlr"
+                        && let Some(decoded) = &mdia_child.decoded
+                    {
+                        // Look for handler type in decoded string
+                        if decoded.contains("vide") {
+                            return Some("vide".to_string());
+                        } else if decoded.contains("soun") {
+                            return Some("soun".to_string());
+                        } else if decoded.contains("text") {
+                            return Some("text".to_string());
+                        }
                     }
                 }
+            }
         }
     }
     None
@@ -220,22 +226,23 @@ fn extract_media_info(trak_box: &mp4box::Box) -> (u32, u64) {
     if let Some(children) = &trak_box.children {
         for child in children {
             if child.typ == "mdia"
-                && let Some(mdia_children) = &child.children {
-                    for mdia_child in mdia_children {
-                        if mdia_child.typ == "mdhd"
-                            && let Some(decoded) = &mdia_child.decoded {
-                                // Look for timescale and duration in different possible formats
-                                let timescale = extract_number_from_decoded(decoded, "timescale")
-                                    .or_else(|| extract_number_from_decoded(decoded, "ts"))
-                                    .unwrap_or(12288); // Common video timescale
-                                let duration = extract_number_from_decoded(decoded, "duration")
-                                    .or_else(|| extract_number_from_decoded(decoded, "dur"))
-                                    .unwrap_or(0)
-                                    as u64;
-                                return (timescale, duration);
-                            }
+                && let Some(mdia_children) = &child.children
+            {
+                for mdia_child in mdia_children {
+                    if mdia_child.typ == "mdhd"
+                        && let Some(decoded) = &mdia_child.decoded
+                    {
+                        // Look for timescale and duration in different possible formats
+                        let timescale = extract_number_from_decoded(decoded, "timescale")
+                            .or_else(|| extract_number_from_decoded(decoded, "ts"))
+                            .unwrap_or(12288); // Common video timescale
+                        let duration = extract_number_from_decoded(decoded, "duration")
+                            .or_else(|| extract_number_from_decoded(decoded, "dur"))
+                            .unwrap_or(0) as u64;
+                        return (timescale, duration);
                     }
                 }
+            }
         }
     }
     (12288, 0) // Default values - common for video
@@ -366,9 +373,10 @@ fn extract_number_from_decoded(decoded: &str, field: &str) -> Option<u32> {
 fn extract_sample_sizes_from_decoded(decoded: &str, count: u32) -> Vec<u32> {
     // First check if there's a uniform sample_size
     if let Some(uniform_size) = extract_number_from_decoded(decoded, "sample_size")
-        && uniform_size > 0 {
-            return vec![uniform_size; count as usize];
-        }
+        && uniform_size > 0
+    {
+        return vec![uniform_size; count as usize];
+    }
 
     // Try to extract individual sample sizes from the decoded string
     // Look for patterns like "sample_sizes: [1234, 5678, ...]"
@@ -515,9 +523,10 @@ fn print_text(tracks: &[TrackInfo], args: &Args) -> Result<()> {
 
         for (count, s) in t.samples.iter().enumerate() {
             if let Some(lim) = args.limit
-                && count >= lim {
-                    break;
-                }
+                && count >= lim
+            {
+                break;
+            }
 
             if args.timing {
                 println!(
