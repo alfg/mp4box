@@ -88,8 +88,8 @@ pub mod util;
 pub use boxes::{BoxHeader, BoxKey, BoxRef, FourCC, NodeKind};
 pub use parser::{parse_children, read_box_header};
 pub use registry::{
-    BoxValue, Co64Data, CttsData, CttsEntry, Registry, SampleEntry, StcoData, StructuredData,
-    StscData, StscEntry, StsdData, StssData, StszData, SttsData, SttsEntry,
+    BoxValue, Co64Data, CttsData, CttsEntry, HdlrData, MdhdData, Registry, SampleEntry, StcoData,
+    StructuredData, StscData, StscEntry, StsdData, StssData, StszData, SttsData, SttsEntry,
 };
 
 // High-level API

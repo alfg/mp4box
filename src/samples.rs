@@ -1,4 +1,4 @@
-use anyhow::{Context, Ok};
+use anyhow::Context;
 use serde::Serialize;
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
@@ -51,7 +51,7 @@ pub struct SampleInfo {
 ///
 /// * `handler_type` - Four-character code indicating the media type (from hdlr box):
 ///   - `"vide"` - Video track
-///   - `"soun"` - Audio track  
+///   - `"soun"` - Audio track
 ///   - `"hint"` - Hint track
 ///   - `"meta"` - Metadata track
 ///   - `"subt"` - Subtitle track
@@ -84,10 +84,10 @@ pub struct SampleInfo {
 ///              track.track_id,
 ///              track.handler_type,
 ///              track.sample_count);
-///              
+///
 ///     let duration_sec = track.duration as f64 / track.timescale as f64;
 ///     println!("Duration: {:.2} seconds", duration_sec);
-///     
+///
 ///     if track.handler_type == "vide" {
 ///         let keyframes = track.samples.iter()
 ///             .filter(|s| s.is_sync)
@@ -603,6 +603,8 @@ fn get_sample_file_offset(tables: &SampleTables, sample_index: u32) -> u64 {
     let mut current_sample = 1u32;
     let mut chunk_index = 0usize;
     let mut samples_per_chunk = 0u32;
+    let mut sample_offset_in_range = 0u32;
+    let mut chunk_offset_in_range = 0u32;
 
     for (i, entry) in stsc.entries.iter().enumerate() {
         // Calculate how many samples are covered by previous chunks with this entry's configuration
@@ -620,8 +622,8 @@ fn get_sample_file_offset(tables: &SampleTables, sample_index: u32) -> u64 {
         if (current_sample as u64) + samples_in_this_range > target_sample as u64 {
             // Target sample is in this range
             // First, find the chunk containing the sample within this range
-            let sample_offset_in_range = target_sample - current_sample;
-            let chunk_offset_in_range = sample_offset_in_range / samples_per_chunk;
+            sample_offset_in_range = target_sample - current_sample;
+            chunk_offset_in_range = sample_offset_in_range / samples_per_chunk;
             chunk_index = (entry.first_chunk - 1) as usize + chunk_offset_in_range as usize;
             break;
         }
@@ -638,9 +640,7 @@ fn get_sample_file_offset(tables: &SampleTables, sample_index: u32) -> u64 {
     let chunk_offset = chunk_offsets[chunk_index];
 
     // Calculate which sample within the chunk we want
-    // Need to recalculate since we need the offset within the specific chunk
-    let sample_offset_in_range = target_sample - current_sample;
-    let chunk_offset_in_range = sample_offset_in_range / samples_per_chunk;
+    // Values were already calculated when breaking out of the loop
     let sample_in_chunk = (sample_offset_in_range % samples_per_chunk) as usize;
 
     // Sum up the sizes of preceding samples in this chunk to get the offset within chunk

@@ -400,7 +400,7 @@ mod tests {
                 assert_eq!(stsd_data.entries.len(), 1);
 
                 let entry = &stsd_data.entries[0];
-                assert_eq!(entry.size, 0); // The decoder doesn't track entry size properly
+                assert_eq!(entry.size, 86);
                 assert_eq!(entry.codec, "avc1");
                 assert_eq!(entry.data_reference_index, 1); // Default value
                 assert_eq!(entry.width, Some(1920));
@@ -457,7 +457,7 @@ mod tests {
                 assert_eq!(stsd_data.entries.len(), 1);
 
                 let entry = &stsd_data.entries[0];
-                assert_eq!(entry.size, 0); // The decoder doesn't track entry size properly
+                assert_eq!(entry.size, 36);
                 assert_eq!(entry.codec, "mp4a");
                 assert_eq!(entry.data_reference_index, 1); // Default value
                 assert_eq!(entry.width, None); // Audio entries don't have width/height

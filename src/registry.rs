@@ -56,7 +56,7 @@ pub struct SampleEntry {
     pub height: Option<u16>,
 }
 
-/// Decoding Time-to-Sample Box data  
+/// Decoding Time-to-Sample Box data
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct SttsData {
     pub version: u8,
@@ -596,7 +596,7 @@ impl BoxDecoder for StsdDecoder {
         }
 
         // First sample entry only (good enough for mp4info-like summary)
-        let _entry_size = r.read_u32::<BigEndian>()?;
+        let entry_size = r.read_u32::<BigEndian>()?;
 
         let mut codec_bytes = [0u8; 4];
         r.read_exact(&mut codec_bytes)?;
@@ -643,11 +643,11 @@ impl BoxDecoder for StsdDecoder {
 
         // Create structured data
         let data = StsdData {
-            version: 0, // We'll need to read this from the FullBox header
-            flags: 0,   // We'll need to read this from the FullBox header
+            version: _version.unwrap_or(0),
+            flags: _flags.unwrap_or(0),
             entry_count,
             entries: vec![SampleEntry {
-                size: 0, // We don't have this from current parsing
+                size: entry_size,
                 codec,
                 data_reference_index: 1, // Default value
                 width: width.map(|w| w as u16),
