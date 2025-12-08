@@ -6,9 +6,8 @@ mod tests {
 
     #[test]
     fn test_stts_structured_decoding() {
-        // Create mock STTS box data
+        // Create mock STTS box data (without version/flags - they're parsed separately)
         let mock_data = vec![
-            0, 0, 0, 0, // version + flags
             0, 0, 0, 2, // entry_count = 2
             0, 0, 0, 100, // sample_count = 100
             0, 0, 4, 0, // sample_delta = 1024
@@ -49,9 +48,8 @@ mod tests {
     fn test_stsz_structured_decoding() {
         use mp4box::registry::StszDecoder;
 
-        // Create mock STSZ box data with individual sample sizes
+        // Create mock STSZ box data with individual sample sizes (without version/flags)
         let mock_data = vec![
-            0, 0, 0, 0, // version + flags
             0, 0, 0, 0, // sample_size = 0 (individual sizes)
             0, 0, 0, 3, // sample_count = 3
             0, 0, 3, 232, // size = 1000
@@ -91,9 +89,8 @@ mod tests {
     fn test_stsc_structured_decoding() {
         use mp4box::registry::StscDecoder;
 
-        // Create mock STSC box data
+        // Create mock STSC box data (without version/flags)
         let mock_data = vec![
-            0, 0, 0, 0, // version + flags
             0, 0, 0, 2, // entry_count = 2
             0, 0, 0, 1, // first_chunk = 1
             0, 0, 0, 5, // samples_per_chunk = 5
