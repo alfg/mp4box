@@ -239,6 +239,7 @@ fn decode_value(f: &mut File, b: &BoxRef, reg: &Registry) -> Option<String> {
         match res {
             Ok(BoxValue::Text(s)) => Some(s),
             Ok(BoxValue::Bytes(bytes)) => Some(format!("{} bytes", bytes.len())),
+            Ok(BoxValue::Structured(data)) => Some(format!("structured: {:?}", data)),
             Err(e) => Some(format!("[decode error: {}]", e)),
         }
     } else {

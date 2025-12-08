@@ -5,11 +5,134 @@ use std::io::{Cursor, Read};
 
 /// A value returned from a box decoder.
 ///
-/// Decoders may return either a human-readable text summary or raw bytes.
+/// Decoders may return either a human-readable text summary, raw bytes, or structured data.
 #[derive(Debug, Clone)]
 pub enum BoxValue {
     Text(String),
     Bytes(Vec<u8>),
+    Structured(StructuredData),
+}
+
+/// Structured data for sample table boxes
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub enum StructuredData {
+    /// Sample Description Box (stsd)
+    SampleDescription(StsdData),
+    /// Decoding Time-to-Sample Box (stts)
+    DecodingTimeToSample(SttsData),
+    /// Composition Time-to-Sample Box (ctts) 
+    CompositionTimeToSample(CttsData),
+    /// Sample-to-Chunk Box (stsc)
+    SampleToChunk(StscData),
+    /// Sample Size Box (stsz)
+    SampleSize(StszData),
+    /// Sync Sample Box (stss)
+    SyncSample(StssData),
+    /// Chunk Offset Box (stco)
+    ChunkOffset(StcoData),
+    /// 64-bit Chunk Offset Box (co64)
+    ChunkOffset64(Co64Data),
+}
+
+/// Sample Description Box data
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct StsdData {
+    pub version: u8,
+    pub flags: u32,
+    pub entry_count: u32,
+    pub entries: Vec<SampleEntry>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct SampleEntry {
+    pub size: u32,
+    pub codec: String,
+    pub data_reference_index: u16,
+    pub width: Option<u16>,
+    pub height: Option<u16>,
+}
+
+/// Decoding Time-to-Sample Box data  
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct SttsData {
+    pub version: u8,
+    pub flags: u32,
+    pub entry_count: u32,
+    pub entries: Vec<SttsEntry>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct SttsEntry {
+    pub sample_count: u32,
+    pub sample_delta: u32,
+}
+
+/// Composition Time-to-Sample Box data
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct CttsData {
+    pub version: u8,
+    pub flags: u32,
+    pub entry_count: u32,
+    pub entries: Vec<CttsEntry>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct CttsEntry {
+    pub sample_count: u32,
+    pub sample_offset: i32, // Can be negative in version 1
+}
+
+/// Sample-to-Chunk Box data
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct StscData {
+    pub version: u8,
+    pub flags: u32,
+    pub entry_count: u32,
+    pub entries: Vec<StscEntry>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct StscEntry {
+    pub first_chunk: u32,
+    pub samples_per_chunk: u32,
+    pub sample_description_index: u32,
+}
+
+/// Sample Size Box data
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct StszData {
+    pub version: u8,
+    pub flags: u32,
+    pub sample_size: u32,
+    pub sample_count: u32,
+    pub sample_sizes: Vec<u32>, // Empty if sample_size > 0
+}
+
+/// Sync Sample Box data
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct StssData {
+    pub version: u8,
+    pub flags: u32,
+    pub entry_count: u32,
+    pub sample_numbers: Vec<u32>,
+}
+
+/// Chunk Offset Box data
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct StcoData {
+    pub version: u8,
+    pub flags: u32,
+    pub entry_count: u32,
+    pub chunk_offsets: Vec<u32>,
+}
+
+/// 64-bit Chunk Offset Box data
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct Co64Data {
+    pub version: u8,
+    pub flags: u32,
+    pub entry_count: u32,
+    pub chunk_offsets: Vec<u64>,
 }
 
 /// Trait for custom box decoders.
@@ -430,7 +553,21 @@ impl BoxDecoder for StsdDecoder {
             parts.push(format!("height={}", h));
         }
 
-        Ok(BoxValue::Text(parts.join(" ")))
+        // Create structured data
+        let data = StsdData {
+            version: 0, // We'll need to read this from the FullBox header
+            flags: 0,   // We'll need to read this from the FullBox header
+            entry_count,
+            entries: vec![SampleEntry {
+                size: 0, // We don't have this from current parsing
+                codec,
+                data_reference_index: 1, // Default value
+                width: width.map(|w| w as u16),
+                height: height.map(|h| h as u16),
+            }],
+        };
+
+        Ok(BoxValue::Structured(StructuredData::SampleDescription(data)))
     }
 }
 
@@ -440,51 +577,35 @@ pub struct SttsDecoder;
 impl BoxDecoder for SttsDecoder {
     fn decode(&self, r: &mut dyn Read, _hdr: &BoxHeader) -> anyhow::Result<BoxValue> {
         let buf = read_all(r)?;
-        if buf.len() < 8 {
-            return Ok(BoxValue::Text(format!(
-                "stts: payload too short ({} bytes)",
-                buf.len()
-            )));
-        }
+        let mut cur = Cursor::new(&buf);
 
-        let mut pos = 0usize;
-        let _version = buf[pos];
-        pos += 1;
-        if pos + 3 > buf.len() {
-            return Ok(BoxValue::Text("stts: truncated flags".into()));
-        }
-        pos += 3;
-
-        let read_u32 = |pos: &mut usize| -> Option<u32> {
-            if *pos + 4 > buf.len() {
-                return None;
-            }
-            let v = u32::from_be_bytes(buf[*pos..*pos + 4].try_into().unwrap());
-            *pos += 4;
-            Some(v)
+        let version = cur.read_u8()?;
+        let flags = {
+            let mut f = [0u8; 3];
+            cur.read_exact(&mut f)?;
+            ((f[0] as u32) << 16) | ((f[1] as u32) << 8) | (f[2] as u32)
         };
 
-        let entry_count = read_u32(&mut pos).unwrap_or(0);
+        let entry_count = cur.read_u32::<BigEndian>()?;
+        let mut entries = Vec::new();
 
-        if entry_count == 0 {
-            return Ok(BoxValue::Text("entries=0".into()));
+        for _ in 0..entry_count {
+            let sample_count = cur.read_u32::<BigEndian>()?;
+            let sample_delta = cur.read_u32::<BigEndian>()?;
+            entries.push(SttsEntry {
+                sample_count,
+                sample_delta,
+            });
         }
 
-        // best-effort first entry
-        let count = read_u32(&mut pos);
-        let delta = read_u32(&mut pos);
+        let data = SttsData {
+            version,
+            flags,
+            entry_count,
+            entries,
+        };
 
-        if let (Some(c), Some(d)) = (count, delta) {
-            Ok(BoxValue::Text(format!(
-                "entries={} first: count={} delta={}",
-                entry_count, c, d
-            )))
-        } else {
-            Ok(BoxValue::Text(format!(
-                "entries={} (no first entry, short payload)",
-                entry_count
-            )))
-        }
+        Ok(BoxValue::Structured(StructuredData::DecodingTimeToSample(data)))
     }
 }
 
@@ -496,15 +617,28 @@ impl BoxDecoder for StssDecoder {
         let buf = read_all(r)?;
         let mut cur = Cursor::new(&buf);
 
-        let _version = cur.read_u8()?;
-        let _flags = {
+        let version = cur.read_u8()?;
+        let flags = {
             let mut f = [0u8; 3];
             cur.read_exact(&mut f)?;
             ((f[0] as u32) << 16) | ((f[1] as u32) << 8) | (f[2] as u32)
         };
 
         let entry_count = cur.read_u32::<BigEndian>()?;
-        Ok(BoxValue::Text(format!("sync_sample_count={}", entry_count)))
+        let mut sample_numbers = Vec::new();
+
+        for _ in 0..entry_count {
+            sample_numbers.push(cur.read_u32::<BigEndian>()?);
+        }
+
+        let data = StssData {
+            version,
+            flags,
+            entry_count,
+            sample_numbers,
+        };
+
+        Ok(BoxValue::Structured(StructuredData::SyncSample(data)))
     }
 }
 
@@ -517,17 +651,37 @@ impl BoxDecoder for CttsDecoder {
         let mut cur = Cursor::new(&buf);
 
         let version = cur.read_u8()?;
-        let _flags = {
+        let flags = {
             let mut f = [0u8; 3];
             cur.read_exact(&mut f)?;
             ((f[0] as u32) << 16) | ((f[1] as u32) << 8) | (f[2] as u32)
         };
 
         let entry_count = cur.read_u32::<BigEndian>()?;
-        Ok(BoxValue::Text(format!(
-            "version={} entries={}",
-            version, entry_count
-        )))
+        let mut entries = Vec::new();
+
+        for _ in 0..entry_count {
+            let sample_count = cur.read_u32::<BigEndian>()?;
+            // In version 1, sample_offset can be signed
+            let sample_offset = if version == 1 {
+                cur.read_i32::<BigEndian>()?
+            } else {
+                cur.read_u32::<BigEndian>()? as i32
+            };
+            entries.push(CttsEntry {
+                sample_count,
+                sample_offset,
+            });
+        }
+
+        let data = CttsData {
+            version,
+            flags,
+            entry_count,
+            entries,
+        };
+
+        Ok(BoxValue::Structured(StructuredData::CompositionTimeToSample(data)))
     }
 }
 
@@ -539,29 +693,35 @@ impl BoxDecoder for StscDecoder {
         let buf = read_all(r)?;
         let mut cur = Cursor::new(&buf);
 
-        let _version = cur.read_u8()?;
-        let _flags = {
+        let version = cur.read_u8()?;
+        let flags = {
             let mut f = [0u8; 3];
             cur.read_exact(&mut f)?;
             ((f[0] as u32) << 16) | ((f[1] as u32) << 8) | (f[2] as u32)
         };
 
         let entry_count = cur.read_u32::<BigEndian>()?;
-        let mut first = None;
-        if entry_count > 0 {
+        let mut entries = Vec::new();
+
+        for _ in 0..entry_count {
             let first_chunk = cur.read_u32::<BigEndian>()?;
             let samples_per_chunk = cur.read_u32::<BigEndian>()?;
-            let _sd_idx = cur.read_u32::<BigEndian>()?;
-            first = Some((first_chunk, samples_per_chunk));
+            let sample_description_index = cur.read_u32::<BigEndian>()?;
+            entries.push(StscEntry {
+                first_chunk,
+                samples_per_chunk,
+                sample_description_index,
+            });
         }
 
-        Ok(BoxValue::Text(match first {
-            Some((fc, spc)) => format!(
-                "entries={} first: first_chunk={} samples_per_chunk={}",
-                entry_count, fc, spc
-            ),
-            None => format!("entries={}", entry_count),
-        }))
+        let data = StscData {
+            version,
+            flags,
+            entry_count,
+            entries,
+        };
+
+        Ok(BoxValue::Structured(StructuredData::SampleToChunk(data)))
     }
 }
 
@@ -573,8 +733,8 @@ impl BoxDecoder for StszDecoder {
         let buf = read_all(r)?;
         let mut cur = Cursor::new(&buf);
 
-        let _version = cur.read_u8()?;
-        let _flags = {
+        let version = cur.read_u8()?;
+        let flags = {
             let mut f = [0u8; 3];
             cur.read_exact(&mut f)?;
             ((f[0] as u32) << 16) | ((f[1] as u32) << 8) | (f[2] as u32)
@@ -582,11 +742,24 @@ impl BoxDecoder for StszDecoder {
 
         let sample_size = cur.read_u32::<BigEndian>()?;
         let sample_count = cur.read_u32::<BigEndian>()?;
+        let mut sample_sizes = Vec::new();
 
-        Ok(BoxValue::Text(format!(
-            "sample_size={} sample_count={}",
-            sample_size, sample_count
-        )))
+        // If sample_size is 0, each sample has its own size
+        if sample_size == 0 {
+            for _ in 0..sample_count {
+                sample_sizes.push(cur.read_u32::<BigEndian>()?);
+            }
+        }
+
+        let data = StszData {
+            version,
+            flags,
+            sample_size,
+            sample_count,
+            sample_sizes,
+        };
+
+        Ok(BoxValue::Structured(StructuredData::SampleSize(data)))
     }
 }
 
@@ -598,23 +771,28 @@ impl BoxDecoder for StcoDecoder {
         let buf = read_all(r)?;
         let mut cur = Cursor::new(&buf);
 
-        let _version = cur.read_u8()?;
-        let _flags = {
+        let version = cur.read_u8()?;
+        let flags = {
             let mut f = [0u8; 3];
             cur.read_exact(&mut f)?;
             ((f[0] as u32) << 16) | ((f[1] as u32) << 8) | (f[2] as u32)
         };
 
         let entry_count = cur.read_u32::<BigEndian>()?;
-        let mut first = Vec::new();
-        for _ in 0..entry_count.min(3) {
-            first.push(cur.read_u32::<BigEndian>()?);
+        let mut chunk_offsets = Vec::new();
+        
+        for _ in 0..entry_count {
+            chunk_offsets.push(cur.read_u32::<BigEndian>()?);
         }
 
-        Ok(BoxValue::Text(format!(
-            "entries={} first_offsets={:?}",
-            entry_count, first
-        )))
+        let data = StcoData {
+            version,
+            flags,
+            entry_count,
+            chunk_offsets,
+        };
+
+        Ok(BoxValue::Structured(StructuredData::ChunkOffset(data)))
     }
 }
 
@@ -626,23 +804,28 @@ impl BoxDecoder for Co64Decoder {
         let buf = read_all(r)?;
         let mut cur = Cursor::new(&buf);
 
-        let _version = cur.read_u8()?;
-        let _flags = {
+        let version = cur.read_u8()?;
+        let flags = {
             let mut f = [0u8; 3];
             cur.read_exact(&mut f)?;
             ((f[0] as u32) << 16) | ((f[1] as u32) << 8) | (f[2] as u32)
         };
 
         let entry_count = cur.read_u32::<BigEndian>()?;
-        let mut first = Vec::new();
-        for _ in 0..entry_count.min(3) {
-            first.push(cur.read_u64::<BigEndian>()?);
+        let mut chunk_offsets = Vec::new();
+        
+        for _ in 0..entry_count {
+            chunk_offsets.push(cur.read_u64::<BigEndian>()?);
         }
 
-        Ok(BoxValue::Text(format!(
-            "entries={} first_offsets={:?}",
-            entry_count, first
-        )))
+        let data = Co64Data {
+            version,
+            flags,
+            entry_count,
+            chunk_offsets,
+        };
+
+        Ok(BoxValue::Structured(StructuredData::ChunkOffset64(data)))
     }
 }
 

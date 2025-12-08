@@ -6,7 +6,7 @@ use crate::{
 };
 use byteorder::ReadBytesExt;
 use serde::Serialize;
-use std::io::{Read, Seek, SeekFrom};
+use std::{io::{Read, Seek, SeekFrom}};
 
 /// A JSON-serializable representation of a single MP4 box.
 ///
@@ -188,6 +188,7 @@ fn decode_value<R: Read + Seek>(r: &mut R, b: &BoxRef, reg: &Registry) -> Option
         match res {
             Ok(BoxValue::Text(s)) => Some(s),
             Ok(BoxValue::Bytes(bytes)) => Some(format!("{} bytes", bytes.len())),
+            Ok(BoxValue::Structured(data)) => Some(format!("structured: {:?}", data)),
             Err(e) => Some(format!("[decode error: {}]", e)),
         }
     } else {
