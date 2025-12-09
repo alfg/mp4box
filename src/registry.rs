@@ -5,11 +5,172 @@ use std::io::{Cursor, Read};
 
 /// A value returned from a box decoder.
 ///
-/// Decoders may return either a human-readable text summary or raw bytes.
+/// Decoders may return either a human-readable text summary, raw bytes, or structured data.
 #[derive(Debug, Clone)]
 pub enum BoxValue {
     Text(String),
     Bytes(Vec<u8>),
+    Structured(StructuredData),
+}
+
+/// Structured data for sample table boxes
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub enum StructuredData {
+    /// Sample Description Box (stsd)
+    SampleDescription(StsdData),
+    /// Decoding Time-to-Sample Box (stts)
+    DecodingTimeToSample(SttsData),
+    /// Composition Time-to-Sample Box (ctts)
+    CompositionTimeToSample(CttsData),
+    /// Sample-to-Chunk Box (stsc)
+    SampleToChunk(StscData),
+    /// Sample Size Box (stsz)
+    SampleSize(StszData),
+    /// Sync Sample Box (stss)
+    SyncSample(StssData),
+    /// Chunk Offset Box (stco)
+    ChunkOffset(StcoData),
+    /// 64-bit Chunk Offset Box (co64)
+    ChunkOffset64(Co64Data),
+    /// Media Header Box (mdhd)
+    MediaHeader(MdhdData),
+    /// Handler Reference Box (hdlr)
+    HandlerReference(HdlrData),
+    /// Track Header Box (tkhd)
+    TrackHeader(TkhdData),
+}
+
+/// Sample Description Box data
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct StsdData {
+    pub version: u8,
+    pub flags: u32,
+    pub entry_count: u32,
+    pub entries: Vec<SampleEntry>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct SampleEntry {
+    pub size: u32,
+    pub codec: String,
+    pub data_reference_index: u16,
+    pub width: Option<u16>,
+    pub height: Option<u16>,
+}
+
+/// Decoding Time-to-Sample Box data
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct SttsData {
+    pub version: u8,
+    pub flags: u32,
+    pub entry_count: u32,
+    pub entries: Vec<SttsEntry>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct SttsEntry {
+    pub sample_count: u32,
+    pub sample_delta: u32,
+}
+
+/// Composition Time-to-Sample Box data
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct CttsData {
+    pub version: u8,
+    pub flags: u32,
+    pub entry_count: u32,
+    pub entries: Vec<CttsEntry>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct CttsEntry {
+    pub sample_count: u32,
+    pub sample_offset: i32, // Can be negative in version 1
+}
+
+/// Sample-to-Chunk Box data
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct StscData {
+    pub version: u8,
+    pub flags: u32,
+    pub entry_count: u32,
+    pub entries: Vec<StscEntry>,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct StscEntry {
+    pub first_chunk: u32,
+    pub samples_per_chunk: u32,
+    pub sample_description_index: u32,
+}
+
+/// Sample Size Box data
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct StszData {
+    pub version: u8,
+    pub flags: u32,
+    pub sample_size: u32,
+    pub sample_count: u32,
+    pub sample_sizes: Vec<u32>, // Empty if sample_size > 0
+}
+
+/// Sync Sample Box data
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct StssData {
+    pub version: u8,
+    pub flags: u32,
+    pub entry_count: u32,
+    pub sample_numbers: Vec<u32>,
+}
+
+/// Chunk Offset Box data
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct StcoData {
+    pub version: u8,
+    pub flags: u32,
+    pub entry_count: u32,
+    pub chunk_offsets: Vec<u32>,
+}
+
+/// 64-bit Chunk Offset Box data
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct Co64Data {
+    pub version: u8,
+    pub flags: u32,
+    pub entry_count: u32,
+    pub chunk_offsets: Vec<u64>,
+}
+
+/// Media Header Box data
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct MdhdData {
+    pub version: u8,
+    pub flags: u32,
+    pub creation_time: u32,
+    pub modification_time: u32,
+    pub timescale: u32,
+    pub duration: u32,
+    pub language: String,
+}
+
+/// Handler Reference Box data
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct HdlrData {
+    pub version: u8,
+    pub flags: u32,
+    pub handler_type: String,
+    pub name: String,
+}
+
+/// Track Header Box data
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct TkhdData {
+    pub version: u8,
+    pub flags: u32,
+    pub track_id: u32,
+    pub duration: u64,
+    pub width: f32,
+    pub height: f32,
 }
 
 /// Trait for custom box decoders.
@@ -17,7 +178,13 @@ pub enum BoxValue {
 /// A decoder is responsible for interpreting the payload of a specific box
 /// (identified by a [`BoxKey`]) and returning a [`BoxValue`].
 pub trait BoxDecoder: Send + Sync {
-    fn decode(&self, r: &mut dyn Read, hdr: &BoxHeader) -> anyhow::Result<BoxValue>;
+    fn decode(
+        &self,
+        r: &mut dyn Read,
+        hdr: &BoxHeader,
+        version: Option<u8>,
+        flags: Option<u32>,
+    ) -> anyhow::Result<BoxValue>;
 }
 
 /// Registry of decoders keyed by `BoxKey` (4CC or UUID).
@@ -63,8 +230,12 @@ impl Registry {
         key: &BoxKey,
         r: &mut dyn Read,
         hdr: &BoxHeader,
+        version: Option<u8>,
+        flags: Option<u32>,
     ) -> Option<anyhow::Result<BoxValue>> {
-        self.map.get(key).map(|d| d.inner.decode(r, hdr))
+        self.map
+            .get(key)
+            .map(|d| d.inner.decode(r, hdr, version, flags))
     }
 }
 
@@ -98,7 +269,13 @@ fn lang_from_u16(code: u16) -> String {
 pub struct FtypDecoder;
 
 impl BoxDecoder for FtypDecoder {
-    fn decode(&self, r: &mut dyn Read, _hdr: &BoxHeader) -> anyhow::Result<BoxValue> {
+    fn decode(
+        &self,
+        r: &mut dyn Read,
+        _hdr: &BoxHeader,
+        _version: Option<u8>,
+        _flags: Option<u32>,
+    ) -> anyhow::Result<BoxValue> {
         let buf = read_all(r)?;
         if buf.len() < 8 {
             return Ok(BoxValue::Text(format!(
@@ -132,7 +309,13 @@ impl BoxDecoder for FtypDecoder {
 pub struct MvhdDecoder;
 
 impl BoxDecoder for MvhdDecoder {
-    fn decode(&self, r: &mut dyn Read, _hdr: &BoxHeader) -> anyhow::Result<BoxValue> {
+    fn decode(
+        &self,
+        r: &mut dyn Read,
+        _hdr: &BoxHeader,
+        _version: Option<u8>,
+        _flags: Option<u32>,
+    ) -> anyhow::Result<BoxValue> {
         let buf = read_all(r)?;
         let mut cur = Cursor::new(&buf);
 
@@ -168,7 +351,13 @@ impl BoxDecoder for MvhdDecoder {
 pub struct TkhdDecoder;
 
 impl BoxDecoder for TkhdDecoder {
-    fn decode(&self, r: &mut dyn Read, _hdr: &BoxHeader) -> anyhow::Result<BoxValue> {
+    fn decode(
+        &self,
+        r: &mut dyn Read,
+        _hdr: &BoxHeader,
+        _version: Option<u8>,
+        _flags: Option<u32>,
+    ) -> anyhow::Result<BoxValue> {
         let buf = read_all(r)?;
         if buf.len() < 4 {
             return Ok(BoxValue::Text(format!(
@@ -183,6 +372,10 @@ impl BoxDecoder for TkhdDecoder {
         if pos + 3 > buf.len() {
             return Ok(BoxValue::Text("tkhd: truncated flags".into()));
         }
+
+        // Extract flags as a 24-bit big-endian value
+        let flags_bytes = [0, buf[pos], buf[pos + 1], buf[pos + 2]];
+        let flags_value = u32::from_be_bytes(flags_bytes);
         pos += 3;
 
         let read_u32 = |pos: &mut usize| -> Option<u32> {
@@ -215,16 +408,17 @@ impl BoxDecoder for TkhdDecoder {
             track_id = read_u32(&mut pos).unwrap_or(0);
             let _ = read_u32(&mut pos); // reserved
             duration = read_u64(&mut pos).unwrap_or(0);
+            eprintln!(
+                "DEBUG tkhd v1: track_id={}, duration={}",
+                track_id, duration
+            );
         } else {
-            // version 0: creation_time (4), modification_time (4), track_id (4),
-            // reserved (4), duration (4)
-            if read_u32(&mut pos).is_none() || read_u32(&mut pos).is_none() {
-                return Ok(BoxValue::Text(
-                    "tkhd: truncated creation/modification".into(),
-                ));
-            }
+            // For version 0, read two 8-byte timestamps then the fields
+            let _creation_time = read_u64(&mut pos).unwrap_or(0);
+            let _modification_time = read_u64(&mut pos).unwrap_or(0);
+
             track_id = read_u32(&mut pos).unwrap_or(0);
-            let _ = read_u32(&mut pos); // reserved
+            let _reserved = read_u32(&mut pos).unwrap_or(0);
             duration = read_u32(&mut pos).unwrap_or(0) as u64;
         }
 
@@ -255,22 +449,24 @@ impl BoxDecoder for TkhdDecoder {
         }
 
         // width / height
-        if pos + 8 <= buf.len() {
+        let (width, height) = if pos + 8 <= buf.len() {
             let width = u32::from_be_bytes(buf[pos..pos + 4].try_into().unwrap());
             let height = u32::from_be_bytes(buf[pos + 4..pos + 8].try_into().unwrap());
-            Ok(BoxValue::Text(format!(
-                "track_id={} duration={} width={} height={}",
-                track_id,
-                duration,
-                width as f32 / 65536.0,
-                height as f32 / 65536.0
-            )))
+            (width as f32 / 65536.0, height as f32 / 65536.0)
         } else {
-            Ok(BoxValue::Text(format!(
-                "track_id={} duration={} (no width/height, short payload)",
-                track_id, duration
-            )))
-        }
+            (0.0, 0.0)
+        };
+
+        let data = TkhdData {
+            version,
+            flags: flags_value,
+            track_id,
+            duration,
+            width,
+            height,
+        };
+
+        Ok(BoxValue::Structured(StructuredData::TrackHeader(data)))
     }
 }
 
@@ -278,9 +474,15 @@ impl BoxDecoder for TkhdDecoder {
 pub struct MdhdDecoder;
 
 impl BoxDecoder for MdhdDecoder {
-    fn decode(&self, r: &mut dyn Read, _hdr: &BoxHeader) -> anyhow::Result<BoxValue> {
-        let _creation_time = r.read_u32::<BigEndian>()?;
-        let _modification_time = r.read_u32::<BigEndian>()?;
+    fn decode(
+        &self,
+        r: &mut dyn Read,
+        _hdr: &BoxHeader,
+        version: Option<u8>,
+        flags: Option<u32>,
+    ) -> anyhow::Result<BoxValue> {
+        let creation_time = r.read_u32::<BigEndian>()?;
+        let modification_time = r.read_u32::<BigEndian>()?;
         let timescale = r.read_u32::<BigEndian>()?;
         let duration = r.read_u32::<BigEndian>()?;
         let language_code = r.read_u16::<BigEndian>()?;
@@ -288,10 +490,17 @@ impl BoxDecoder for MdhdDecoder {
 
         let lang = lang_from_u16(language_code);
 
-        Ok(BoxValue::Text(format!(
-            "timescale={} duration={} language={}",
-            timescale, duration, lang
-        )))
+        let data = MdhdData {
+            version: version.unwrap_or(0),
+            flags: flags.unwrap_or(0),
+            creation_time,
+            modification_time,
+            timescale,
+            duration,
+            language: lang,
+        };
+
+        Ok(BoxValue::Structured(StructuredData::MediaHeader(data)))
     }
 }
 
@@ -299,7 +508,13 @@ impl BoxDecoder for MdhdDecoder {
 pub struct HdlrDecoder;
 
 impl BoxDecoder for HdlrDecoder {
-    fn decode(&self, r: &mut dyn Read, _hdr: &BoxHeader) -> anyhow::Result<BoxValue> {
+    fn decode(
+        &self,
+        r: &mut dyn Read,
+        _hdr: &BoxHeader,
+        version: Option<u8>,
+        flags: Option<u32>,
+    ) -> anyhow::Result<BoxValue> {
         use byteorder::{BigEndian, ReadBytesExt};
 
         // pre_defined (4 bytes) + handler_type (4 bytes)
@@ -322,10 +537,14 @@ impl BoxDecoder for HdlrDecoder {
 
         let handler_str = std::str::from_utf8(&handler_type).unwrap_or("????");
 
-        Ok(BoxValue::Text(format!(
-            "handler={} name=\"{}\"",
-            handler_str, name
-        )))
+        let data = HdlrData {
+            version: version.unwrap_or(0),
+            flags: flags.unwrap_or(0),
+            handler_type: handler_str.to_string(),
+            name,
+        };
+
+        Ok(BoxValue::Structured(StructuredData::HandlerReference(data)))
     }
 }
 
@@ -333,7 +552,13 @@ impl BoxDecoder for HdlrDecoder {
 pub struct SidxDecoder;
 
 impl BoxDecoder for SidxDecoder {
-    fn decode(&self, r: &mut dyn Read, _hdr: &BoxHeader) -> anyhow::Result<BoxValue> {
+    fn decode(
+        &self,
+        r: &mut dyn Read,
+        _hdr: &BoxHeader,
+        _version: Option<u8>,
+        _flags: Option<u32>,
+    ) -> anyhow::Result<BoxValue> {
         let buf = read_all(r)?;
         let mut cur = Cursor::new(&buf);
 
@@ -372,7 +597,13 @@ impl BoxDecoder for SidxDecoder {
 pub struct StsdDecoder;
 
 impl BoxDecoder for StsdDecoder {
-    fn decode(&self, r: &mut dyn Read, _hdr: &BoxHeader) -> anyhow::Result<BoxValue> {
+    fn decode(
+        &self,
+        r: &mut dyn Read,
+        _hdr: &BoxHeader,
+        _version: Option<u8>,
+        _flags: Option<u32>,
+    ) -> anyhow::Result<BoxValue> {
         use byteorder::{BigEndian, ReadBytesExt};
 
         // stsd is a FullBox; our reader is already positioned at payload:
@@ -385,7 +616,7 @@ impl BoxDecoder for StsdDecoder {
         }
 
         // First sample entry only (good enough for mp4info-like summary)
-        let _entry_size = r.read_u32::<BigEndian>()?;
+        let entry_size = r.read_u32::<BigEndian>()?;
 
         let mut codec_bytes = [0u8; 4];
         r.read_exact(&mut codec_bytes)?;
@@ -430,7 +661,23 @@ impl BoxDecoder for StsdDecoder {
             parts.push(format!("height={}", h));
         }
 
-        Ok(BoxValue::Text(parts.join(" ")))
+        // Create structured data
+        let data = StsdData {
+            version: _version.unwrap_or(0),
+            flags: _flags.unwrap_or(0),
+            entry_count,
+            entries: vec![SampleEntry {
+                size: entry_size,
+                codec,
+                data_reference_index: 1, // Default value
+                width: width.map(|w| w as u16),
+                height: height.map(|h| h as u16),
+            }],
+        };
+
+        Ok(BoxValue::Structured(StructuredData::SampleDescription(
+            data,
+        )))
     }
 }
 
@@ -438,53 +685,40 @@ impl BoxDecoder for StsdDecoder {
 pub struct SttsDecoder;
 
 impl BoxDecoder for SttsDecoder {
-    fn decode(&self, r: &mut dyn Read, _hdr: &BoxHeader) -> anyhow::Result<BoxValue> {
+    fn decode(
+        &self,
+        r: &mut dyn Read,
+        _hdr: &BoxHeader,
+        version: Option<u8>,
+        flags: Option<u32>,
+    ) -> anyhow::Result<BoxValue> {
         let buf = read_all(r)?;
-        if buf.len() < 8 {
-            return Ok(BoxValue::Text(format!(
-                "stts: payload too short ({} bytes)",
-                buf.len()
-            )));
+        let mut cur = Cursor::new(&buf);
+
+        // For FullBox types, version and flags are already parsed by the main parser
+        // and stripped from the payload. We start directly with the box-specific data.
+        let entry_count = cur.read_u32::<BigEndian>()?;
+        let mut entries = Vec::new();
+
+        for _ in 0..entry_count {
+            let sample_count = cur.read_u32::<BigEndian>()?;
+            let sample_delta = cur.read_u32::<BigEndian>()?;
+            entries.push(SttsEntry {
+                sample_count,
+                sample_delta,
+            });
         }
 
-        let mut pos = 0usize;
-        let _version = buf[pos];
-        pos += 1;
-        if pos + 3 > buf.len() {
-            return Ok(BoxValue::Text("stts: truncated flags".into()));
-        }
-        pos += 3;
-
-        let read_u32 = |pos: &mut usize| -> Option<u32> {
-            if *pos + 4 > buf.len() {
-                return None;
-            }
-            let v = u32::from_be_bytes(buf[*pos..*pos + 4].try_into().unwrap());
-            *pos += 4;
-            Some(v)
+        let data = SttsData {
+            version: version.unwrap_or(0),
+            flags: flags.unwrap_or(0),
+            entry_count,
+            entries,
         };
 
-        let entry_count = read_u32(&mut pos).unwrap_or(0);
-
-        if entry_count == 0 {
-            return Ok(BoxValue::Text("entries=0".into()));
-        }
-
-        // best-effort first entry
-        let count = read_u32(&mut pos);
-        let delta = read_u32(&mut pos);
-
-        if let (Some(c), Some(d)) = (count, delta) {
-            Ok(BoxValue::Text(format!(
-                "entries={} first: count={} delta={}",
-                entry_count, c, d
-            )))
-        } else {
-            Ok(BoxValue::Text(format!(
-                "entries={} (no first entry, short payload)",
-                entry_count
-            )))
-        }
+        Ok(BoxValue::Structured(StructuredData::DecodingTimeToSample(
+            data,
+        )))
     }
 }
 
@@ -492,19 +726,32 @@ impl BoxDecoder for SttsDecoder {
 pub struct StssDecoder;
 
 impl BoxDecoder for StssDecoder {
-    fn decode(&self, r: &mut dyn Read, _hdr: &BoxHeader) -> anyhow::Result<BoxValue> {
+    fn decode(
+        &self,
+        r: &mut dyn Read,
+        _hdr: &BoxHeader,
+        version: Option<u8>,
+        flags: Option<u32>,
+    ) -> anyhow::Result<BoxValue> {
         let buf = read_all(r)?;
         let mut cur = Cursor::new(&buf);
 
-        let _version = cur.read_u8()?;
-        let _flags = {
-            let mut f = [0u8; 3];
-            cur.read_exact(&mut f)?;
-            ((f[0] as u32) << 16) | ((f[1] as u32) << 8) | (f[2] as u32)
+        // For FullBox types, version and flags are already parsed by the main parser
+        let entry_count = cur.read_u32::<BigEndian>()?;
+        let mut sample_numbers = Vec::new();
+
+        for _ in 0..entry_count {
+            sample_numbers.push(cur.read_u32::<BigEndian>()?);
+        }
+
+        let data = StssData {
+            version: version.unwrap_or(0),
+            flags: flags.unwrap_or(0),
+            entry_count,
+            sample_numbers,
         };
 
-        let entry_count = cur.read_u32::<BigEndian>()?;
-        Ok(BoxValue::Text(format!("sync_sample_count={}", entry_count)))
+        Ok(BoxValue::Structured(StructuredData::SyncSample(data)))
     }
 }
 
@@ -512,22 +759,41 @@ impl BoxDecoder for StssDecoder {
 pub struct CttsDecoder;
 
 impl BoxDecoder for CttsDecoder {
-    fn decode(&self, r: &mut dyn Read, _hdr: &BoxHeader) -> anyhow::Result<BoxValue> {
+    fn decode(
+        &self,
+        r: &mut dyn Read,
+        _hdr: &BoxHeader,
+        version: Option<u8>,
+        flags: Option<u32>,
+    ) -> anyhow::Result<BoxValue> {
         let buf = read_all(r)?;
         let mut cur = Cursor::new(&buf);
 
-        let version = cur.read_u8()?;
-        let _flags = {
-            let mut f = [0u8; 3];
-            cur.read_exact(&mut f)?;
-            ((f[0] as u32) << 16) | ((f[1] as u32) << 8) | (f[2] as u32)
+        // For FullBox types, version and flags are already parsed by the main parser
+        let entry_count = cur.read_u32::<BigEndian>()?;
+        let mut entries = Vec::new();
+
+        for _ in 0..entry_count {
+            let sample_count = cur.read_u32::<BigEndian>()?;
+            // Note: In version 1, sample_offset can be signed, but since we don't have access
+            // to the parsed version here, we assume version 0 behavior (unsigned)
+            let sample_offset = cur.read_u32::<BigEndian>()? as i32;
+            entries.push(CttsEntry {
+                sample_count,
+                sample_offset,
+            });
+        }
+
+        let data = CttsData {
+            version: version.unwrap_or(0),
+            flags: flags.unwrap_or(0),
+            entry_count,
+            entries,
         };
 
-        let entry_count = cur.read_u32::<BigEndian>()?;
-        Ok(BoxValue::Text(format!(
-            "version={} entries={}",
-            version, entry_count
-        )))
+        Ok(BoxValue::Structured(
+            StructuredData::CompositionTimeToSample(data),
+        ))
     }
 }
 
@@ -535,33 +801,39 @@ impl BoxDecoder for CttsDecoder {
 pub struct StscDecoder;
 
 impl BoxDecoder for StscDecoder {
-    fn decode(&self, r: &mut dyn Read, _hdr: &BoxHeader) -> anyhow::Result<BoxValue> {
+    fn decode(
+        &self,
+        r: &mut dyn Read,
+        _hdr: &BoxHeader,
+        version: Option<u8>,
+        flags: Option<u32>,
+    ) -> anyhow::Result<BoxValue> {
         let buf = read_all(r)?;
         let mut cur = Cursor::new(&buf);
 
-        let _version = cur.read_u8()?;
-        let _flags = {
-            let mut f = [0u8; 3];
-            cur.read_exact(&mut f)?;
-            ((f[0] as u32) << 16) | ((f[1] as u32) << 8) | (f[2] as u32)
-        };
-
+        // For FullBox types, version and flags are already parsed by the main parser
         let entry_count = cur.read_u32::<BigEndian>()?;
-        let mut first = None;
-        if entry_count > 0 {
+        let mut entries = Vec::new();
+
+        for _ in 0..entry_count {
             let first_chunk = cur.read_u32::<BigEndian>()?;
             let samples_per_chunk = cur.read_u32::<BigEndian>()?;
-            let _sd_idx = cur.read_u32::<BigEndian>()?;
-            first = Some((first_chunk, samples_per_chunk));
+            let sample_description_index = cur.read_u32::<BigEndian>()?;
+            entries.push(StscEntry {
+                first_chunk,
+                samples_per_chunk,
+                sample_description_index,
+            });
         }
 
-        Ok(BoxValue::Text(match first {
-            Some((fc, spc)) => format!(
-                "entries={} first: first_chunk={} samples_per_chunk={}",
-                entry_count, fc, spc
-            ),
-            None => format!("entries={}", entry_count),
-        }))
+        let data = StscData {
+            version: version.unwrap_or(0),
+            flags: flags.unwrap_or(0),
+            entry_count,
+            entries,
+        };
+
+        Ok(BoxValue::Structured(StructuredData::SampleToChunk(data)))
     }
 }
 
@@ -569,24 +841,37 @@ impl BoxDecoder for StscDecoder {
 pub struct StszDecoder;
 
 impl BoxDecoder for StszDecoder {
-    fn decode(&self, r: &mut dyn Read, _hdr: &BoxHeader) -> anyhow::Result<BoxValue> {
+    fn decode(
+        &self,
+        r: &mut dyn Read,
+        _hdr: &BoxHeader,
+        version: Option<u8>,
+        flags: Option<u32>,
+    ) -> anyhow::Result<BoxValue> {
         let buf = read_all(r)?;
         let mut cur = Cursor::new(&buf);
 
-        let _version = cur.read_u8()?;
-        let _flags = {
-            let mut f = [0u8; 3];
-            cur.read_exact(&mut f)?;
-            ((f[0] as u32) << 16) | ((f[1] as u32) << 8) | (f[2] as u32)
-        };
-
+        // For FullBox types, version and flags are already parsed by the main parser
         let sample_size = cur.read_u32::<BigEndian>()?;
         let sample_count = cur.read_u32::<BigEndian>()?;
+        let mut sample_sizes = Vec::new();
 
-        Ok(BoxValue::Text(format!(
-            "sample_size={} sample_count={}",
-            sample_size, sample_count
-        )))
+        // If sample_size is 0, each sample has its own size
+        if sample_size == 0 {
+            for _ in 0..sample_count {
+                sample_sizes.push(cur.read_u32::<BigEndian>()?);
+            }
+        }
+
+        let data = StszData {
+            version: version.unwrap_or(0),
+            flags: flags.unwrap_or(0),
+            sample_size,
+            sample_count,
+            sample_sizes,
+        };
+
+        Ok(BoxValue::Structured(StructuredData::SampleSize(data)))
     }
 }
 
@@ -594,27 +879,32 @@ impl BoxDecoder for StszDecoder {
 pub struct StcoDecoder;
 
 impl BoxDecoder for StcoDecoder {
-    fn decode(&self, r: &mut dyn Read, _hdr: &BoxHeader) -> anyhow::Result<BoxValue> {
+    fn decode(
+        &self,
+        r: &mut dyn Read,
+        _hdr: &BoxHeader,
+        version: Option<u8>,
+        flags: Option<u32>,
+    ) -> anyhow::Result<BoxValue> {
         let buf = read_all(r)?;
         let mut cur = Cursor::new(&buf);
 
-        let _version = cur.read_u8()?;
-        let _flags = {
-            let mut f = [0u8; 3];
-            cur.read_exact(&mut f)?;
-            ((f[0] as u32) << 16) | ((f[1] as u32) << 8) | (f[2] as u32)
-        };
-
+        // For FullBox types, version and flags are already parsed by the main parser
         let entry_count = cur.read_u32::<BigEndian>()?;
-        let mut first = Vec::new();
-        for _ in 0..entry_count.min(3) {
-            first.push(cur.read_u32::<BigEndian>()?);
+        let mut chunk_offsets = Vec::new();
+
+        for _ in 0..entry_count {
+            chunk_offsets.push(cur.read_u32::<BigEndian>()?);
         }
 
-        Ok(BoxValue::Text(format!(
-            "entries={} first_offsets={:?}",
-            entry_count, first
-        )))
+        let data = StcoData {
+            version: version.unwrap_or(0),
+            flags: flags.unwrap_or(0),
+            entry_count,
+            chunk_offsets,
+        };
+
+        Ok(BoxValue::Structured(StructuredData::ChunkOffset(data)))
     }
 }
 
@@ -622,27 +912,32 @@ impl BoxDecoder for StcoDecoder {
 pub struct Co64Decoder;
 
 impl BoxDecoder for Co64Decoder {
-    fn decode(&self, r: &mut dyn Read, _hdr: &BoxHeader) -> anyhow::Result<BoxValue> {
+    fn decode(
+        &self,
+        r: &mut dyn Read,
+        _hdr: &BoxHeader,
+        version: Option<u8>,
+        flags: Option<u32>,
+    ) -> anyhow::Result<BoxValue> {
         let buf = read_all(r)?;
         let mut cur = Cursor::new(&buf);
 
-        let _version = cur.read_u8()?;
-        let _flags = {
-            let mut f = [0u8; 3];
-            cur.read_exact(&mut f)?;
-            ((f[0] as u32) << 16) | ((f[1] as u32) << 8) | (f[2] as u32)
-        };
-
+        // For FullBox types, version and flags are already parsed by the main parser
         let entry_count = cur.read_u32::<BigEndian>()?;
-        let mut first = Vec::new();
-        for _ in 0..entry_count.min(3) {
-            first.push(cur.read_u64::<BigEndian>()?);
+        let mut chunk_offsets = Vec::new();
+
+        for _ in 0..entry_count {
+            chunk_offsets.push(cur.read_u64::<BigEndian>()?);
         }
 
-        Ok(BoxValue::Text(format!(
-            "entries={} first_offsets={:?}",
-            entry_count, first
-        )))
+        let data = Co64Data {
+            version: version.unwrap_or(0),
+            flags: flags.unwrap_or(0),
+            entry_count,
+            chunk_offsets,
+        };
+
+        Ok(BoxValue::Structured(StructuredData::ChunkOffset64(data)))
     }
 }
 
@@ -650,7 +945,13 @@ impl BoxDecoder for Co64Decoder {
 pub struct ElstDecoder;
 
 impl BoxDecoder for ElstDecoder {
-    fn decode(&self, r: &mut dyn Read, _hdr: &BoxHeader) -> anyhow::Result<BoxValue> {
+    fn decode(
+        &self,
+        r: &mut dyn Read,
+        _hdr: &BoxHeader,
+        _version: Option<u8>,
+        _flags: Option<u32>,
+    ) -> anyhow::Result<BoxValue> {
         let buf = read_all(r)?;
         if buf.len() < 8 {
             return Ok(BoxValue::Text(format!(

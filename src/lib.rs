@@ -82,11 +82,16 @@ pub mod boxes;
 pub mod known_boxes;
 pub mod parser;
 pub mod registry;
+pub mod samples;
 pub mod util;
 
 pub use boxes::{BoxHeader, BoxKey, BoxRef, FourCC, NodeKind};
 pub use parser::{parse_children, read_box_header};
-pub use registry::{BoxValue, Registry};
+pub use registry::{
+    BoxValue, Co64Data, CttsData, CttsEntry, HdlrData, MdhdData, Registry, SampleEntry, StcoData,
+    StructuredData, StscData, StscEntry, StsdData, StssData, StszData, SttsData, SttsEntry,
+};
 
 // High-level API
 pub use api::{Box, HexDump, get_boxes, hex_range};
+pub use samples::{SampleInfo, TrackSamples, track_samples_from_path, track_samples_from_reader};

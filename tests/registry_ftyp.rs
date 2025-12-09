@@ -5,7 +5,13 @@ use std::io::Read;
 struct DummyDecoder;
 
 impl BoxDecoder for DummyDecoder {
-    fn decode(&self, r: &mut dyn Read, _hdr: &BoxHeader) -> anyhow::Result<BoxValue> {
+    fn decode(
+        &self,
+        r: &mut dyn Read,
+        _hdr: &BoxHeader,
+        _version: Option<u8>,
+        _flags: Option<u32>,
+    ) -> anyhow::Result<BoxValue> {
         let mut buf = Vec::new();
         r.read_to_end(&mut buf)?;
         Ok(BoxValue::Bytes(buf))
@@ -31,7 +37,13 @@ fn registry_invokes_decoder() {
     let payload = &[1u8, 2, 3, 4];
     let mut cursor = std::io::Cursor::new(payload.to_vec());
 
-    let res = reg.decode(&BoxKey::FourCC(FourCC(*b"test")), &mut cursor, &hdr);
+    let res = reg.decode(
+        &BoxKey::FourCC(FourCC(*b"test")),
+        &mut cursor,
+        &hdr,
+        None,
+        None,
+    );
     assert!(res.is_some());
 
     match res.unwrap().unwrap() {

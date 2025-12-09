@@ -14,6 +14,22 @@ path = "src/lib.rs"
 name = "mp4dump"
 path = "src/bin/mp4dump.rs"
 
+[[bin]]
+name = "mp4info"
+path = "src/bin/mp4info.rs"
+
+[[bin]]
+name = "mp4samples"
+path = "src/bin/mp4samples.rs"
+
+[[example]]
+name = "simple"
+path = "examples/simple.rs"
+
+[[example]]
+name = "boxes"
+path = "examples/boxes.rs"
+
 [dependencies]
 anyhow = "1.0"
 byteorder = "1.5"

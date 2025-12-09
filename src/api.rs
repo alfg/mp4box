@@ -39,6 +39,8 @@ pub struct Box {
     pub full_name: String,
     /// Decoded box content if decode=true and decoder available
     pub decoded: Option<String>,
+    /// Structured data if decode=true and structured decoder available
+    pub structured_data: Option<crate::registry::StructuredData>,
     /// Child boxes for container types
     pub children: Option<Vec<Box>>,
 }
@@ -173,25 +175,42 @@ fn payload_geometry(b: &BoxRef) -> Option<(u64, u64)> {
     }
 }
 
-fn decode_value<R: Read + Seek>(r: &mut R, b: &BoxRef, reg: &Registry) -> Option<String> {
-    let (key, off, len) = payload_region(b)?;
+fn decode_value<R: Read + Seek>(
+    r: &mut R,
+    b: &BoxRef,
+    reg: &Registry,
+) -> (Option<String>, Option<crate::registry::StructuredData>) {
+    let (key, off, len) = match payload_region(b) {
+        Some(region) => region,
+        None => return (None, None),
+    };
     if len == 0 {
-        return None;
+        return (None, None);
     }
 
     if r.seek(SeekFrom::Start(off)).is_err() {
-        return None;
+        return (None, None);
     }
     let mut limited = r.take(len);
 
-    if let Some(res) = reg.decode(&key, &mut limited, &b.hdr) {
+    // Extract version and flags from the box if it's a FullBox
+    let (version, flags) = match &b.kind {
+        crate::boxes::NodeKind::FullBox { version, flags, .. } => (Some(*version), Some(*flags)),
+        _ => (None, None),
+    };
+
+    if let Some(res) = reg.decode(&key, &mut limited, &b.hdr, version, flags) {
         match res {
-            Ok(BoxValue::Text(s)) => Some(s),
-            Ok(BoxValue::Bytes(bytes)) => Some(format!("{} bytes", bytes.len())),
-            Err(e) => Some(format!("[decode error: {}]", e)),
+            Ok(BoxValue::Text(s)) => (Some(s), None),
+            Ok(BoxValue::Bytes(bytes)) => (Some(format!("{} bytes", bytes.len())), None),
+            Ok(BoxValue::Structured(data)) => {
+                let debug_str = format!("structured: {:?}", data);
+                (Some(debug_str), Some(data))
+            }
+            Err(e) => (Some(format!("[decode error: {}]", e)), None),
         }
     } else {
-        None
+        (None, None)
     }
 }
 
@@ -222,10 +241,10 @@ fn build_box<R: Read + Seek>(r: &mut R, b: &BoxRef, decode: bool, reg: &Registry
         }
     };
 
-    let decoded = if decode {
+    let (decoded, structured_data) = if decode {
         decode_value(r, b, reg)
     } else {
-        None
+        (None, None)
     };
 
     Box {
@@ -242,6 +261,7 @@ fn build_box<R: Read + Seek>(r: &mut R, b: &BoxRef, decode: bool, reg: &Registry
         kind: kind_str,
         full_name,
         decoded,
+        structured_data,
         children,
     }
 }
