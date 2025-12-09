@@ -181,13 +181,23 @@ fn find_stbl_box(trak_box: &mp4box::Box) -> Option<&mp4box::Box> {
 
 // Helper functions for extracting track metadata
 fn extract_track_id(trak_box: &mp4box::Box) -> Option<u32> {
-    // Look for tkhd box and try to parse track ID from decoded string
+    // Look for tkhd box and extract track ID from structured data
     if let Some(children) = &trak_box.children {
         for child in children {
-            if child.typ == "tkhd"
-                && let Some(decoded) = &child.decoded
-            {
-                return extract_number_from_decoded(decoded, "track_id");
+            if child.typ == "tkhd" {
+                // Extract track ID from structured data
+                if let Some(mp4box::registry::StructuredData::TrackHeader(tkhd_data)) =
+                    &child.structured_data
+                {
+                    return Some(tkhd_data.track_id);
+                }
+
+                // Fallback to text parsing if structured data not available
+                if let Some(decoded) = &child.decoded
+                    && let Some(track_id) = extract_number_from_decoded(decoded, "track_id")
+                {
+                    return Some(track_id);
+                }
             }
         }
     }
@@ -195,23 +205,19 @@ fn extract_track_id(trak_box: &mp4box::Box) -> Option<u32> {
 }
 
 fn extract_handler_type(trak_box: &mp4box::Box) -> Option<String> {
-    // Navigate to mdia/hdlr and extract handler type
+    // Navigate to mdia/hdlr and extract handler type from structured data
     if let Some(children) = &trak_box.children {
         for child in children {
             if child.typ == "mdia"
                 && let Some(mdia_children) = &child.children
             {
                 for mdia_child in mdia_children {
-                    if mdia_child.typ == "hdlr"
-                        && let Some(decoded) = &mdia_child.decoded
-                    {
-                        // Look for handler type in decoded string
-                        if decoded.contains("vide") {
-                            return Some("vide".to_string());
-                        } else if decoded.contains("soun") {
-                            return Some("soun".to_string());
-                        } else if decoded.contains("text") {
-                            return Some("text".to_string());
+                    if mdia_child.typ == "hdlr" {
+                        // Extract handler type from structured data
+                        if let Some(mp4box::registry::StructuredData::HandlerReference(hdlr_data)) =
+                            &mdia_child.structured_data
+                        {
+                            return Some(hdlr_data.handler_type.clone());
                         }
                     }
                 }
@@ -222,24 +228,20 @@ fn extract_handler_type(trak_box: &mp4box::Box) -> Option<String> {
 }
 
 fn extract_media_info(trak_box: &mp4box::Box) -> (u32, u64) {
-    // Navigate to mdia/mdhd and extract timescale and duration
+    // Navigate to mdia/mdhd and extract timescale and duration from structured data
     if let Some(children) = &trak_box.children {
         for child in children {
             if child.typ == "mdia"
                 && let Some(mdia_children) = &child.children
             {
                 for mdia_child in mdia_children {
-                    if mdia_child.typ == "mdhd"
-                        && let Some(decoded) = &mdia_child.decoded
-                    {
-                        // Look for timescale and duration in different possible formats
-                        let timescale = extract_number_from_decoded(decoded, "timescale")
-                            .or_else(|| extract_number_from_decoded(decoded, "ts"))
-                            .unwrap_or(12288); // Common video timescale
-                        let duration = extract_number_from_decoded(decoded, "duration")
-                            .or_else(|| extract_number_from_decoded(decoded, "dur"))
-                            .unwrap_or(0) as u64;
-                        return (timescale, duration);
+                    if mdia_child.typ == "mdhd" {
+                        // Extract timescale and duration from structured data
+                        if let Some(mp4box::registry::StructuredData::MediaHeader(mdhd_data)) =
+                            &mdia_child.structured_data
+                        {
+                            return (mdhd_data.timescale, mdhd_data.duration as u64);
+                        }
                     }
                 }
             }

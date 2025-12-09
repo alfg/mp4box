@@ -318,17 +318,20 @@ pub fn extract_track_samples<R: Read + Seek>(
 }
 
 fn find_track_id(trak_box: &crate::Box) -> anyhow::Result<u32> {
+    use crate::registry::StructuredData;
+
     // Look for tkhd box to get track ID
     if let Some(children) = &trak_box.children {
         for child in children {
-            if child.typ == "tkhd" && child.decoded.is_some() {
-                // Parse track ID from tkhd box
-                // For now, return a default value - this would need proper parsing
-                return Ok(1);
+            if child.typ == "tkhd" {
+                // Extract track ID from structured data
+                if let Some(StructuredData::TrackHeader(tkhd_data)) = &child.structured_data {
+                    return Ok(tkhd_data.track_id);
+                }
             }
         }
     }
-    Ok(1) // Default track ID
+    anyhow::bail!("No tkhd box found or track ID could not be parsed")
 }
 
 fn find_media_info(trak_box: &crate::Box) -> anyhow::Result<(String, u32, u64)> {
@@ -448,9 +451,10 @@ fn extract_sample_tables(stbl_box: &crate::Box) -> anyhow::Result<SampleTables> 
                     crate::registry::StructuredData::ChunkOffset64(data) => {
                         tables.co64 = Some(data.clone());
                     }
-                    // MediaHeader and HandlerReference are not sample table data, ignore them
+                    // MediaHeader, HandlerReference, and TrackHeader are not sample table data, ignore them
                     crate::registry::StructuredData::MediaHeader(_) => {}
                     crate::registry::StructuredData::HandlerReference(_) => {}
+                    crate::registry::StructuredData::TrackHeader(_) => {}
                 }
             }
         }
@@ -681,4 +685,143 @@ fn get_sample_file_offset(tables: &SampleTables, sample_index: u32) -> u64 {
     }
 
     chunk_offset + offset_in_chunk
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::registry::{StructuredData, TkhdData};
+
+    #[test]
+    fn test_find_track_id_from_structured_data() {
+        // Create a mock tkhd box with structured data
+        let tkhd_data = TkhdData {
+            version: 0,
+            flags: 0,
+            track_id: 42,
+            duration: 48000,
+            width: 1920.0,
+            height: 1080.0,
+        };
+
+        let tkhd_box = crate::Box {
+            offset: 0,
+            size: 0,
+            header_size: 0,
+            payload_offset: None,
+            payload_size: None,
+            typ: "tkhd".to_string(),
+            uuid: None,
+            version: Some(0),
+            flags: Some(0),
+            kind: "full".to_string(),
+            full_name: "Track Header Box".to_string(),
+            decoded: None,
+            structured_data: Some(StructuredData::TrackHeader(tkhd_data)),
+            children: None,
+        };
+
+        let trak_box = crate::Box {
+            offset: 0,
+            size: 0,
+            header_size: 0,
+            payload_offset: None,
+            payload_size: None,
+            typ: "trak".to_string(),
+            uuid: None,
+            version: None,
+            flags: None,
+            kind: "container".to_string(),
+            full_name: "Track Box".to_string(),
+            decoded: None,
+            structured_data: None,
+            children: Some(vec![tkhd_box]),
+        };
+
+        // Test that we can extract the correct track ID
+        let track_id = find_track_id(&trak_box).unwrap();
+        assert_eq!(track_id, 42);
+    }
+
+    #[test]
+    fn test_find_track_id_multiple_tracks() {
+        // Test with different track IDs to ensure each gets the right one
+        for expected_id in [1, 3, 7, 255] {
+            let tkhd_data = TkhdData {
+                version: 0,
+                flags: 0,
+                track_id: expected_id,
+                duration: 24000,
+                width: 0.0,
+                height: 0.0,
+            };
+
+            let tkhd_box = crate::Box {
+                offset: 0,
+                size: 0,
+                header_size: 0,
+                payload_offset: None,
+                payload_size: None,
+                typ: "tkhd".to_string(),
+                uuid: None,
+                version: Some(0),
+                flags: Some(0),
+                kind: "full".to_string(),
+                full_name: "Track Header Box".to_string(),
+                decoded: None,
+                structured_data: Some(StructuredData::TrackHeader(tkhd_data)),
+                children: None,
+            };
+
+            let trak_box = crate::Box {
+                offset: 0,
+                size: 0,
+                header_size: 0,
+                payload_offset: None,
+                payload_size: None,
+                typ: "trak".to_string(),
+                uuid: None,
+                version: None,
+                flags: None,
+                kind: "container".to_string(),
+                full_name: "Track Box".to_string(),
+                decoded: None,
+                structured_data: None,
+                children: Some(vec![tkhd_box]),
+            };
+
+            let track_id = find_track_id(&trak_box).unwrap();
+            assert_eq!(track_id, expected_id);
+        }
+    }
+
+    #[test]
+    fn test_find_track_id_no_tkhd_box() {
+        // Test error case when no tkhd box is present
+        let trak_box = crate::Box {
+            offset: 0,
+            size: 0,
+            header_size: 0,
+            payload_offset: None,
+            payload_size: None,
+            typ: "trak".to_string(),
+            uuid: None,
+            version: None,
+            flags: None,
+            kind: "container".to_string(),
+            full_name: "Track Box".to_string(),
+            decoded: None,
+            structured_data: None,
+            children: Some(vec![]),
+        };
+
+        let result = find_track_id(&trak_box);
+        assert!(result.is_err());
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("No tkhd box found")
+        );
+    }
 }

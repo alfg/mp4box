@@ -36,6 +36,8 @@ pub enum StructuredData {
     MediaHeader(MdhdData),
     /// Handler Reference Box (hdlr)
     HandlerReference(HdlrData),
+    /// Track Header Box (tkhd)
+    TrackHeader(TkhdData),
 }
 
 /// Sample Description Box data
@@ -158,6 +160,17 @@ pub struct HdlrData {
     pub flags: u32,
     pub handler_type: String,
     pub name: String,
+}
+
+/// Track Header Box data
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct TkhdData {
+    pub version: u8,
+    pub flags: u32,
+    pub track_id: u32,
+    pub duration: u64,
+    pub width: f32,
+    pub height: f32,
 }
 
 /// Trait for custom box decoders.
@@ -359,6 +372,10 @@ impl BoxDecoder for TkhdDecoder {
         if pos + 3 > buf.len() {
             return Ok(BoxValue::Text("tkhd: truncated flags".into()));
         }
+
+        // Extract flags as a 24-bit big-endian value
+        let flags_bytes = [0, buf[pos], buf[pos + 1], buf[pos + 2]];
+        let flags_value = u32::from_be_bytes(flags_bytes);
         pos += 3;
 
         let read_u32 = |pos: &mut usize| -> Option<u32> {
@@ -391,16 +408,17 @@ impl BoxDecoder for TkhdDecoder {
             track_id = read_u32(&mut pos).unwrap_or(0);
             let _ = read_u32(&mut pos); // reserved
             duration = read_u64(&mut pos).unwrap_or(0);
+            eprintln!(
+                "DEBUG tkhd v1: track_id={}, duration={}",
+                track_id, duration
+            );
         } else {
-            // version 0: creation_time (4), modification_time (4), track_id (4),
-            // reserved (4), duration (4)
-            if read_u32(&mut pos).is_none() || read_u32(&mut pos).is_none() {
-                return Ok(BoxValue::Text(
-                    "tkhd: truncated creation/modification".into(),
-                ));
-            }
+            // For version 0, read two 8-byte timestamps then the fields
+            let _creation_time = read_u64(&mut pos).unwrap_or(0);
+            let _modification_time = read_u64(&mut pos).unwrap_or(0);
+
             track_id = read_u32(&mut pos).unwrap_or(0);
-            let _ = read_u32(&mut pos); // reserved
+            let _reserved = read_u32(&mut pos).unwrap_or(0);
             duration = read_u32(&mut pos).unwrap_or(0) as u64;
         }
 
@@ -431,22 +449,24 @@ impl BoxDecoder for TkhdDecoder {
         }
 
         // width / height
-        if pos + 8 <= buf.len() {
+        let (width, height) = if pos + 8 <= buf.len() {
             let width = u32::from_be_bytes(buf[pos..pos + 4].try_into().unwrap());
             let height = u32::from_be_bytes(buf[pos + 4..pos + 8].try_into().unwrap());
-            Ok(BoxValue::Text(format!(
-                "track_id={} duration={} width={} height={}",
-                track_id,
-                duration,
-                width as f32 / 65536.0,
-                height as f32 / 65536.0
-            )))
+            (width as f32 / 65536.0, height as f32 / 65536.0)
         } else {
-            Ok(BoxValue::Text(format!(
-                "track_id={} duration={} (no width/height, short payload)",
-                track_id, duration
-            )))
-        }
+            (0.0, 0.0)
+        };
+
+        let data = TkhdData {
+            version,
+            flags: flags_value,
+            track_id,
+            duration,
+            width,
+            height,
+        };
+
+        Ok(BoxValue::Structured(StructuredData::TrackHeader(data)))
     }
 }
 
