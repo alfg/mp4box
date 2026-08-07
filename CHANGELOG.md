@@ -5,23 +5,43 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.12.2]
+## [0.13.0]
 
 ### Fixed
 
-- **Deeply nested containers overflowed the stack.** Box nesting is parsed
-  recursively, and nothing bounded the depth. A container whose declared size
-  overruns its parent is clamped to the parent's end, which makes each nested
-  header cost only its 8 bytes — so a ~90 KB file of back-to-back `gmhd`
-  headers reached ~7,300 levels and aborted the process. The parser now stops
-  descending at `MAX_BOX_DEPTH` (64, against a deepest-standard-path of about
-  eight): tolerant parsing reports the box as an opaque leaf with a located
-  issue, strict parsing returns `ParseError::DepthExceeded`.
+**Deeply nested containers overflowed the stack.** Box nesting is parsed
+recursively and nothing bounded the depth, so a malformed file could abort the
+process instead of returning an error. Any consumer that opens untrusted files
+is affected; this is a denial of service, not a memory-safety issue.
+
+The clamp added in 0.12.1 is what makes it cheap to trigger. A container whose
+declared size overruns its parent is clamped to the parent's end, so each
+nested header costs only its 8 bytes while its children still span the rest of
+the file — an 89,874-byte run of back-to-back `gmhd` headers reached ~7,300
+levels of recursion.
+
+The parser now stops descending at `MAX_BOX_DEPTH` (64, against a
+deepest-standard-path of about eight: `moov/trak/mdia/minf/stbl/stsd/avc1/avcC`).
+Tolerant parsing reports the box as an opaque leaf alongside a located issue;
+strict parsing returns the new `ParseError::DepthExceeded`. The cap covers the
+sample-entry walk as well as ordinary containers. Well-formed files decode
+unchanged.
+
+Found by the `mp4_boxes` fuzz target in video-commander.
 
 ### Added
 
-- `MAX_BOX_DEPTH` and `ParseError::DepthExceeded` are public, so callers can
-  distinguish a depth refusal from a malformed box.
+- **`MAX_BOX_DEPTH` is public**, so callers can reason about where the parser
+  will stop.
+- **`ParseError::DepthExceeded`** distinguishes a depth refusal from a
+  malformed box.
+
+### Changed
+
+- **`ParseError` is now `#[non_exhaustive]`.** Adding `DepthExceeded` would
+  otherwise break exhaustive `match`es downstream; marking the enum now makes
+  future variants additive. This is the breaking change behind the minor bump —
+  a `match` on `ParseError` needs a `_` arm.
 
 ## [0.12.1]
 

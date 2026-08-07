@@ -14,7 +14,10 @@ use std::io::{Read, Seek, SeekFrom};
 /// nesting without letting the stack grow unbounded.
 pub const MAX_BOX_DEPTH: usize = 64;
 
+/// Marked `#[non_exhaustive]` so that adding a variant — as `DepthExceeded`
+/// did in 0.13.0 — stays additive for downstream `match`es.
 #[derive(Debug)]
+#[non_exhaustive]
 pub enum ParseError {
     Io(std::io::Error),
     InvalidSize,
