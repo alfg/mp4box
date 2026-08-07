@@ -5,6 +5,24 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.12.2]
+
+### Fixed
+
+- **Deeply nested containers overflowed the stack.** Box nesting is parsed
+  recursively, and nothing bounded the depth. A container whose declared size
+  overruns its parent is clamped to the parent's end, which makes each nested
+  header cost only its 8 bytes — so a ~90 KB file of back-to-back `gmhd`
+  headers reached ~7,300 levels and aborted the process. The parser now stops
+  descending at `MAX_BOX_DEPTH` (64, against a deepest-standard-path of about
+  eight): tolerant parsing reports the box as an opaque leaf with a located
+  issue, strict parsing returns `ParseError::DepthExceeded`.
+
+### Added
+
+- `MAX_BOX_DEPTH` and `ParseError::DepthExceeded` are public, so callers can
+  distinguish a depth refusal from a malformed box.
+
 ## [0.12.1]
 
 ### Fixed

@@ -3,10 +3,22 @@ use crate::known_boxes::KnownBox;
 use crate::util::ReadExt;
 use std::io::{Read, Seek, SeekFrom};
 
+/// Deepest container nesting the parser will descend into.
+///
+/// Box nesting is parsed recursively, so depth is bounded by the stack rather
+/// than by any field in the file. A container whose declared size overruns its
+/// parent is clamped to the parent's end, which makes each nested header cost
+/// only its 8 bytes — so a small file can declare a chain thousands of levels
+/// deep and overflow the stack. Real files stay under ten levels
+/// (`moov/trak/mdia/minf/stbl/stsd/avc1/avcC`); 64 leaves room for vendor
+/// nesting without letting the stack grow unbounded.
+pub const MAX_BOX_DEPTH: usize = 64;
+
 #[derive(Debug)]
 pub enum ParseError {
     Io(std::io::Error),
     InvalidSize,
+    DepthExceeded,
 }
 
 impl std::fmt::Display for ParseError {
@@ -14,6 +26,9 @@ impl std::fmt::Display for ParseError {
         match self {
             ParseError::Io(e) => write!(f, "io: {}", e),
             ParseError::InvalidSize => write!(f, "invalid box size"),
+            ParseError::DepthExceeded => {
+                write!(f, "container nesting deeper than {} levels", MAX_BOX_DEPTH)
+            }
         }
     }
 }
@@ -22,7 +37,7 @@ impl std::error::Error for ParseError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             ParseError::Io(e) => Some(e),
-            ParseError::InvalidSize => None,
+            ParseError::InvalidSize | ParseError::DepthExceeded => None,
         }
     }
 }
@@ -117,7 +132,7 @@ pub fn parse_boxes_tolerant<R: Read + Seek>(
 ) -> Result<(Vec<BoxRef>, Vec<ParseIssue>)> {
     r.seek(SeekFrom::Start(start))?;
     let mut issues = Vec::new();
-    let boxes = match parse_children_impl(r, end, &mut Some(&mut issues)) {
+    let boxes = match parse_children_impl(r, end, &mut Some(&mut issues), 0) {
         Ok(boxes) => boxes,
         // parse_children_impl only propagates errors in strict mode or on
         // seek failures; treat the latter as a terminal issue.
@@ -134,15 +149,19 @@ pub fn parse_boxes_tolerant<R: Read + Seek>(
 
 /// Parse sibling boxes from the current stream position up to `parent_end`.
 pub fn parse_children<R: Read + Seek>(r: &mut R, parent_end: u64) -> Result<Vec<BoxRef>> {
-    parse_children_impl(r, parent_end, &mut None)
+    parse_children_impl(r, parent_end, &mut None, 0)
 }
 
 /// Shared strict/tolerant implementation: `issues: None` is strict mode
 /// (first error propagates), `Some` records problems and recovers.
+///
+/// `depth` is the nesting level of the children being read, counted from 0 at
+/// the top level of the file; see [`MAX_BOX_DEPTH`].
 fn parse_children_impl<R: Read + Seek>(
     r: &mut R,
     parent_end: u64,
     issues: &mut Option<&mut Vec<ParseIssue>>,
+    depth: usize,
 ) -> Result<Vec<BoxRef>> {
     let mut kids = Vec::new();
     // A box header needs at least 8 bytes; ignore trailing padding shorter
@@ -185,7 +204,7 @@ fn parse_children_impl<R: Read + Seek>(
         }
         let box_end = box_end(&h, parent_end);
 
-        let kind = match classify_box(r, &h, box_end, issues) {
+        let kind = match classify_box(r, &h, box_end, issues, depth) {
             Ok(kind) => kind,
             Err(e) => {
                 let Some(issues) = issues else {
@@ -238,12 +257,21 @@ fn classify_box<R: Read + Seek>(
     h: &BoxHeader,
     box_end: u64,
     issues: &mut Option<&mut Vec<ParseIssue>>,
+    depth: usize,
 ) -> Result<NodeKind> {
     let kb = KnownBox::from(h.typ);
     let content_start = h.start.saturating_add(h.header_size);
+    let is_container = kb == KnownBox::Stsd || kb.is_full_container() || kb.is_container();
+
+    // Refuse to recurse past the cap. In tolerant mode the caller turns this
+    // into an opaque leaf plus a located issue, which is the right shape: the
+    // box is real, its interior just isn't safe to walk.
+    if is_container && depth >= MAX_BOX_DEPTH {
+        return Err(ParseError::DepthExceeded);
+    }
 
     if kb == KnownBox::Stsd {
-        return parse_stsd(r, h, box_end, issues);
+        return parse_stsd(r, h, box_end, issues, depth);
     }
 
     if kb.is_full_container() {
@@ -251,14 +279,17 @@ fn classify_box<R: Read + Seek>(
         if kb == KnownBox::Meta && meta_is_quicktime_style(r, content_start, box_end)? {
             r.seek(SeekFrom::Start(content_start))?;
             return Ok(NodeKind::Container(parse_children_impl(
-                r, box_end, issues,
+                r,
+                box_end,
+                issues,
+                depth + 1,
             )?));
         }
         r.seek(SeekFrom::Start(content_start))?;
         let (version, flags) = read_version_flags(r)?;
         let data_offset = r.stream_position()?;
         let data_len = box_end.saturating_sub(data_offset);
-        let children = parse_children_impl(r, box_end, issues)?;
+        let children = parse_children_impl(r, box_end, issues, depth + 1)?;
         return Ok(NodeKind::FullContainer {
             version,
             flags,
@@ -271,7 +302,10 @@ fn classify_box<R: Read + Seek>(
     if kb.is_container() {
         r.seek(SeekFrom::Start(content_start))?;
         return Ok(NodeKind::Container(parse_children_impl(
-            r, box_end, issues,
+            r,
+            box_end,
+            issues,
+            depth + 1,
         )?));
     }
 
@@ -340,6 +374,7 @@ fn parse_stsd<R: Read + Seek>(
     h: &BoxHeader,
     box_end: u64,
     issues: &mut Option<&mut Vec<ParseIssue>>,
+    depth: usize,
 ) -> Result<NodeKind> {
     let content_start = h.start.saturating_add(h.header_size);
     r.seek(SeekFrom::Start(content_start))?;
@@ -365,7 +400,7 @@ fn parse_stsd<R: Read + Seek>(
             }
         };
         let entry_end = self::box_end(&eh, box_end);
-        let kind = parse_sample_entry(r, &eh, entry_end)?;
+        let kind = parse_sample_entry(r, &eh, entry_end, depth + 1)?;
         r.seek(SeekFrom::Start(entry_end))?;
         children.push(BoxRef { hdr: eh, kind });
     }
@@ -446,12 +481,19 @@ fn parse_sample_entry<R: Read + Seek>(
     r: &mut R,
     h: &BoxHeader,
     entry_end: u64,
+    depth: usize,
 ) -> Result<NodeKind> {
     let content_start = h.start.saturating_add(h.header_size);
     let leaf = NodeKind::Leaf {
         data_offset: content_start,
         data_len: entry_end.saturating_sub(content_start),
     };
+
+    // Same depth cap as ordinary containers; a sample entry's children are
+    // parsed by the same recursive walk.
+    if depth >= MAX_BOX_DEPTH {
+        return Ok(leaf);
+    }
 
     let Some(fixed) = sample_entry_fixed_len(r, h.typ, content_start, entry_end)? else {
         return Ok(leaf);
@@ -463,7 +505,7 @@ fn parse_sample_entry<R: Read + Seek>(
     }
 
     r.seek(SeekFrom::Start(child_start))?;
-    match parse_children(r, entry_end) {
+    match parse_children_impl(r, entry_end, &mut None, depth + 1) {
         Ok(kids) if !kids.is_empty() && kids.iter().all(|k| fourcc_is_printable(&k.hdr.typ)) => {
             Ok(NodeKind::Container(kids))
         }
