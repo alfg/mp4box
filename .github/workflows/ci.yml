@@ -21,7 +21,7 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -32,7 +32,7 @@ jobs:
           cargo -V
 
       - name: Cache cargo registry + target
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: |
             ~/.cargo/registry
@@ -57,3 +57,27 @@ jobs:
 
       - name: cargo test
         run: cargo test --all --all-features
+
+  security-audit:
+    name: RustSec advisories
+    runs-on: ubuntu-latest
+
+    # The action reports findings as a check run, which needs more than the
+    # workflow-level read default. Scoped to this job so the build keeps the
+    # narrower grant.
+    permissions:
+      contents: read
+      checks: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      # Catches an advisory landing against a dependency in the same PR that
+      # introduces it. It does *not* cover an advisory published against code
+      # nobody is touching — Dependabot alerts are what close that gap, since
+      # this only runs when something is pushed.
+      - name: cargo audit
+        uses: rustsec/audit-check@v2
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
